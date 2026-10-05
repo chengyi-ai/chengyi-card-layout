@@ -48,14 +48,14 @@
     <h1>正在更新图文工具</h1>
     <p id="status">正在清理旧版离线缓存，草稿内容不会被删除。</p>
     <div class="progress" aria-hidden="true"></div>
-    <p id="retryWrap" hidden>请关闭其他旧的图文工具页面，然后<a id="retryLink" href="card-layout-reset.html?v=20260915-draft-autosave-v1">重新清理</a>。</p>
+    <p id="retryWrap" hidden>请关闭其他旧的图文工具页面，然后<a id="retryLink" href="card-layout-reset.html?v=20261005-local-drafts-v1">重新清理</a>。</p>
   </main>
   <script>
     (async () => {
       const status = document.getElementById('status');
       const retryWrap = document.getElementById('retryWrap');
       const target = new URL('index.html', location.href);
-      target.searchParams.set('v', '20260915-draft-autosave-v1');
+      target.searchParams.set('v', '20261005-local-drafts-v1');
       target.searchParams.set('cache-reset', String(Date.now()));
       const isCardLayoutScope = (scope) => {
         try {

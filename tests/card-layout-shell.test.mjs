@@ -89,9 +89,11 @@ test('作品信息默认折叠，写作与草稿主入口不被折叠', () => {
   const details = html.slice(detailsStart, detailsEnd);
   assert.ok(detailsStart >= 0 && detailsEnd > detailsStart);
   assert.doesNotMatch(html.slice(detailsStart, detailsStart + 80), /\sopen(?:\s|>)/, '作品信息应默认折叠');
-  ['avatarImg', 'avatarInput', 'authorName', 'pubDate', 'draftBackupInput', 'draftBackupStatus'].forEach((id) => {
+  ['avatarImg', 'avatarInput', 'authorName', 'pubDate'].forEach((id) => {
     assert.match(details, new RegExp(`id="${id}"`), `${id} 应放在作品信息面板内`);
   });
+  assert.ok(html.indexOf('id="draftBackupInput"') < detailsStart);
+  assert.ok(html.indexOf('id="draftBackupStatus"') < detailsStart);
   assert.ok(html.indexOf('id="draftSelect"') < detailsStart, '草稿切换必须留在顶部');
   assert.ok(html.indexOf('id="contentEditor"') > detailsEnd, '写作画布不能被作品信息面板折叠');
 });

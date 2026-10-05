@@ -29,6 +29,8 @@ class FakeTransaction {
     this.finished = false;
   }
 
+  abort() { this.finished = true; clearTimeout(this.completeTimer); this.onabort?.(); }
+
   objectStore() {
     return new FakeObjectStore(this, this.database.records);
   }
@@ -76,6 +78,8 @@ class FakeObjectStore {
       return record.accountId;
     });
   }
+
+  getAll() { return this.transaction.request(() => [...this.records.values()].map((r) => structuredClone(r))); }
 
   get(key) {
     return this.transaction.request(() => {
@@ -148,9 +152,6 @@ function loadStorage(overrides = {}) {
   const context = {
     indexedDB: overrides.indexedDB === undefined ? new FakeIndexedDB() : overrides.indexedDB,
     BroadcastChannel: overrides.BroadcastChannel === undefined ? FakeBroadcastChannel : overrides.BroadcastChannel,
-    supabase: overrides.supabase,
-    CHENGYI_CLOUD_CONFIG: overrides.CHENGYI_CLOUD_CONFIG,
-    fetch: overrides.fetch,
     Date,
     Math,
     JSON,
@@ -184,18 +185,19 @@ const sampleStore = {
   deletedDrafts: {},
 };
 
-test("IndexedDB 按账户读写草稿，空账户直接拒绝", async () => {
+test("IndexedDB 固定本机分区并忽略账户参数", async () => {
   const { CardDraftRepository, indexedDB } = loadStorage();
   const repo = new CardDraftRepository({ indexedDB, BroadcastChannel: FakeBroadcastChannel });
-  await assert.rejects(repo.save("", sampleStore), /accountId 不能为空/);
+  await repo.save("", sampleStore);
   await repo.save("owner-a", sampleStore);
   const loaded = await repo.load("owner-a");
   assert.equal(loaded.drafts[0].title, "本机草稿");
-  assert.equal(await repo.load("owner-b"), null);
+  assert.equal((await repo.load("owner-b")).drafts[0].id, "d1");
+  assert.deepEqual([...indexedDB.database.records.keys()], ["local"]);
   repo.close();
 });
 
-test("其他标签页保存同一账户后会通知当前页", async () => {
+test("其他标签页保存本机分区后会通知当前页", async () => {
   FakeBroadcastChannel.channels.clear();
   const indexedDB = new FakeIndexedDB();
   const { CardDraftRepository } = loadStorage({ indexedDB, BroadcastChannel: FakeBroadcastChannel });
@@ -206,125 +208,45 @@ test("其他标签页保存同一账户后会通知当前页", async () => {
   await writer.save("owner-a", sampleStore);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(notices.length, 1);
-  assert.equal(notices[0].accountId, "owner-a");
+  assert.equal(notices[0].accountId, "local");
   assert.equal(notices[0].type, "saved");
   writer.close();
   reader.close();
 });
 
-test("云端首次拉取会合并远端草稿并回写", async () => {
-  const remoteStore = {
-    ...sampleStore,
-    drafts: [{
-      id: "d2",
-      title: "云端草稿",
-      updatedAt: 20,
-      data: { content: "<div>cloud</div>" },
-    }],
-  };
-  const events = [];
-  let uploaded = null;
-  const { CardDraftCloudSync } = loadStorage({
-    CHENGYI_CLOUD_CONFIG: {
-      supabaseUrl: "https://example.supabase.co",
-      supabasePublishableKey: "pub-key",
-    },
-    supabase: {
-      createClient: () => ({
-        auth: {
-          getSession: async () => ({
-            data: { session: { access_token: "token", user: { id: "owner-a" } } },
-            error: null,
-          }),
-        },
-      }),
-    },
-    fetch: async (url, options) => {
-      events.push(options.method);
-      if (options.method === "GET") {
-        return new Response(JSON.stringify({ store: remoteStore }), {
-          status: 200,
-          headers: { etag: '"v1"', "content-type": "application/json" },
-        });
-      }
-      uploaded = JSON.parse(options.body);
-      return new Response(JSON.stringify({ saved: true }), {
-        status: 200,
-        headers: { etag: '"v2"', "content-type": "application/json" },
-      });
-    },
-  });
 
-  let applied = null;
-  const sync = new CardDraftCloudSync({
-    onRemoteStore: async (store) => {
-      applied = store;
-      return store;
-    },
-    getLocalStore: () => sampleStore,
-  });
-  const merged = await sync.init("owner-a");
-  assert.equal(applied.drafts[0].title, "云端草稿");
-  assert.equal(merged.drafts[0].title, "云端草稿");
-  await sync.flush();
-  assert.deepEqual(events, ["GET", "PUT"]);
-  assert.equal(uploaded.store.drafts[0].title, "云端草稿");
+test("首次合并所有旧账户，同 ID 取较新且保留原数据，重新打开不复活", async () => {
+  const { CardDraftRepository, indexedDB } = loadStorage();
+  const records = indexedDB.database.records;
+  const old = (time, title) => ({ ...sampleStore, drafts: [{ ...sampleStore.drafts[0], updatedAt: time, title }] });
+  records.set("owner-a", { accountId: "owner-a", store: old(20, "旧较新") });
+  records.set("owner-b", { accountId: "owner-b", store: old(5, "旧较早") });
+  records.set("local", { accountId: "local", store: old(10, "本机") });
+  const repo = new CardDraftRepository({ indexedDB, BroadcastChannel: null });
+  assert.equal((await repo.load()).drafts[0].title, "旧较新");
+  assert.equal(records.size, 3);
+  assert.equal(records.get("owner-b").store.drafts[0].title, "旧较早");
+  await repo.save("ignored", { ...sampleStore, drafts: [], activeId: null });
+  const reopened = new CardDraftRepository({ indexedDB, BroadcastChannel: null });
+  assert.equal((await reopened.load()).drafts.length, 0);
+  repo.close(); reopened.close();
 });
 
-test("云端 409 冲突时先合并再重试写入", async () => {
-  let putCount = 0;
-  const remoteStore = {
-    ...sampleStore,
-    drafts: [{
-      id: "d3",
-      title: "较新云端",
-      updatedAt: 30,
-      data: { content: "<div>newer</div>" },
-    }],
-  };
-  const { CardDraftCloudSync } = loadStorage({
-    CHENGYI_CLOUD_CONFIG: {
-      supabaseUrl: "https://example.supabase.co",
-      supabasePublishableKey: "pub-key",
-    },
-    supabase: {
-      createClient: () => ({
-        auth: {
-          getSession: async () => ({
-            data: { session: { access_token: "token", user: { id: "owner-a" } } },
-            error: null,
-          }),
-        },
-      }),
-    },
-    fetch: async (_url, options) => {
-      if (options.method === "GET") {
-        return new Response(JSON.stringify({ store: null }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      putCount += 1;
-      if (putCount === 1) {
-        return new Response(JSON.stringify({ store: remoteStore }), {
-          status: 409,
-          headers: { etag: '"remote"', "content-type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ saved: true }), {
-        status: 200,
-        headers: { etag: '"next"', "content-type": "application/json" },
-      });
-    },
-  });
+test("同时间保留本机，删除记录按最新时间合并", () => {
+  const { mergeLocalStores } = loadStorage();
+  const merged = mergeLocalStores([sampleStore, { ...sampleStore, drafts: [{ ...sampleStore.drafts[0], title: "其他" }] }]);
+  assert.equal(merged.drafts[0].title, "本机草稿");
+  assert.equal(mergeLocalStores([sampleStore, { deletedDrafts: { d1: 20 }, drafts: [] }]).drafts.length, 0);
+});
 
-  const sync = new CardDraftCloudSync({
-    onRemoteStore: async (store) => store,
-    getLocalStore: () => sampleStore,
-  });
-  await sync.init("owner-a");
-  sync.scheduleSave(sampleStore, 0);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await sync.flush();
-  assert.equal(putCount, 2);
+test("损坏旧分区不会标记迁移成功，修复后可再次合并", async () => {
+  const { CardDraftRepository, indexedDB } = loadStorage();
+  const records = indexedDB.database.records;
+  records.set('old', { accountId: 'old', store: { drafts: 'invalid' } });
+  const repo = new CardDraftRepository({ indexedDB, BroadcastChannel: null });
+  await assert.rejects(repo.load(), /草稿数据结构不正确/);
+  assert.equal(records.has('local'), false);
+  records.set('old', { accountId: 'old', store: sampleStore });
+  assert.equal((await repo.load()).drafts[0].id, 'd1');
+  assert.equal(records.has('old'), true);
 });

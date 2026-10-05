@@ -3,23 +3,25 @@ const DRAFT_BACKUP_TIME_KEY = 'article-card-last-backup';
 const DRAFT_BACKUP_APP = 'ChengYi Card Layout';
 const DRAFT_BACKUP_MEDIA_VERSION = 3;
 const DRAFT_BACKUP_MAX_ZIP_BYTES = 500 * 1024 * 1024;
-const hasDraftAccount = () => Boolean(localStorage.getItem('creator-toolkit-active-account-v1'));
-const draftAccountId = () => String(localStorage.getItem('creator-toolkit-active-account-v1') || '').trim();
-const draftAccountKey = (base) => window.cardAppStorageKey
-  ? window.cardAppStorageKey(base)
-  : (window.cardStorageKey ? window.cardStorageKey(base) : base);
+const draftAccountId = () => 'local';
+const draftAccountKey = (base) => `${base}:local`;
 
 function updateDraftBackupStatus() {
   const target = document.getElementById('draftBackupStatus');
   if (!target) return;
-  if (target && !hasDraftAccount()) {
-    target.textContent = '登录后可备份当前账户草稿';
-    return;
-  }
   const value = localStorage.getItem(draftAccountKey(DRAFT_BACKUP_TIME_KEY));
   target.textContent = value
     ? '上次备份 ' + new Date(value).toLocaleDateString('zh-CN')
-    : '尚未备份当前账户草稿';
+    : '尚未导出本机草稿备份';
+}
+
+// 旧工具箱备份里的账户字段只属于旧站作用域，恢复时不继承。
+function stripBackupAccountFields(value) {
+  if (Array.isArray(value)) return value.map(stripBackupAccountFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !['accountId', 'userId', 'ownerId'].includes(key))
+    .map(([key, child]) => [key, stripBackupAccountFields(child)]));
 }
 
 function draftHasContent(draft) {
@@ -185,9 +187,6 @@ function downloadDraftBackup(blob, filename) {
 
 async function exportDraftBackup() {
   try {
-    if (!hasDraftAccount()) {
-      throw new Error('请先登录账户，再备份当前账户的草稿');
-    }
     if (window.flushCardDrafts && await window.flushCardDrafts() === false) {
       throw new Error('当前草稿尚未保存，请先缩小图片或释放浏览器存储空间');
     }
@@ -342,14 +341,12 @@ async function restoreMediaAssets({ zip, assets, accountId, mediaStore }) {
 
 async function importDraftBackup(input) {
   try {
-    if (!hasDraftAccount()) {
-      throw new Error('请先登录账户，再恢复到当前账户');
-    }
     const restoreAccountId = draftAccountId();
     const file = input.files && input.files[0];
     if (!file) return;
     if (file.size > DRAFT_BACKUP_MAX_ZIP_BYTES) throw new Error('备份文件超过 500MB，请拆分草稿后再恢复');
-    const { payload, zip } = await readDraftBackup(file);
+    const { payload: rawPayload, zip } = await readDraftBackup(file);
+    const payload = stripBackupAccountFields(rawPayload);
     const isMediaBackup = payload?.version === DRAFT_BACKUP_MEDIA_VERSION;
     if (isMediaBackup) validateMediaManifest(payload, zip);
     if (!payload || payload.app !== DRAFT_BACKUP_APP || ![1, 2, 3].includes(payload.version) || !payload.drafts || typeof payload.drafts !== 'object') {
@@ -388,9 +385,6 @@ async function importDraftBackup(input) {
       });
     }
     try {
-      if (draftAccountId() !== restoreAccountId) {
-        throw new Error('恢复期间登录账户已切换，为避免草稿串号，本次恢复已取消');
-      }
       if (window.replaceCardDraftStore) await window.replaceCardDraftStore(mergePlan.store);
       else localStorage.setItem(draftAccountKey(DRAFT_BACKUP_KEY), JSON.stringify(mergePlan.store));
     } catch (error) {

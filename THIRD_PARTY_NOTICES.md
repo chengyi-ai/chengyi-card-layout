@@ -33,7 +33,7 @@ The adapted implementation remains subject to the following MIT notice:
 The editor loads the browser libraries below from this repository so that image,
 video and Live Photo export does not depend on a public CDN. Retain the adjacent
 license files whenever these browser bundles are redistributed. Exact source
-URLs and SHA-256 values for the newly vendored Supabase, html2canvas and JSZip
+URLs and SHA-256 values for the newly vendored html2canvas and JSZip
 files are recorded in the repository-level `vendor/README.md`; the existing
 mp4box.js and mp4-muxer bundles retain their adjacent license texts.
 

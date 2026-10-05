@@ -30,6 +30,7 @@ const resetVersion = resetHtml.match(/target\.searchParams\.set\('v', '([^']+)'\
 assert.ok(styleVersion, "card-layout style.css must have a cache-busting version");
 assert.equal(appVersion, styleVersion, "card-layout CSS and JS cache versions must stay aligned");
 assert.equal(resetVersion, styleVersion, "cache-reset bridge must open the current card-layout version");
-assert.match(build, /path\.endsWith\("\/sw\.js"\)/);
+assert.match(build, /Cache-Control: no-cache/);
+assert.doesNotMatch(build, /dist\/server|handleCardDraftRequest/);
 
 console.log("card highlight export safeguards passed");

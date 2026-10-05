@@ -1,1 +1,7 @@
 .draft-backup-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.draft-backup-row button{border:1px solid var(--cy-300,#d3d3c8);border-radius:999px;background:transparent;color:var(--cy-800,#383934);padding:6px 10px;font-size:10px;cursor:pointer}.draft-backup-row button:hover{background:var(--cy-200,#e6e6df)}.draft-backup-row small{font-size:9px;color:var(--cy-500,#7c7d6e);margin-left:auto}
+
+.local-draft-notice { margin: 0 0 12px; color: #555; font-size: 12px; line-height: 1.6; }
+/* 备份位于编辑区常显位置，手机上保持可点击尺寸。 */
+.draft-backup-row { margin-bottom: 8px; }
+.draft-backup-row button { font-size: 12px; font-weight: 600; min-height: 34px; background: var(--cy-100, #f3f3ed); }
+@media (max-width: 768px) { .draft-backup-row button { min-height: 44px; } }

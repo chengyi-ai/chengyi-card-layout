@@ -445,10 +445,8 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.draft-save-status[data-state="saving"],
-.draft-save-status[data-state="syncing"] { color: #2b66c8; }
-.draft-save-status[data-state="saved"],
-.draft-save-status[data-state="synced"] { color: #26764a; }
+.draft-save-status[data-state="saving"] { color: #2b66c8; }
+.draft-save-status[data-state="saved"] { color: #26764a; }
 .draft-save-status[data-state="error"] { color: #b54732; font-weight: 600; }
 
 .draft-bar { display: flex; gap: 8px; align-items: center; }

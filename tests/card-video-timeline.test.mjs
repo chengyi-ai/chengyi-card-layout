@@ -270,7 +270,7 @@ test('时间轴与草稿恢复、媒体切换、无视频状态完成集成', ()
   assert.match(deselect, /_cleanupVideoTimeline\s*\(/, '切换到普通图片或无媒体时必须清理上一条时间轴');
   assert.match(cleanup, /timelineSession\s*\+=\s*1/, '媒体切换必须让旧异步读取任务失效');
   assert.match(cleanup, /URL\.revokeObjectURL\s*\(/, '媒体切换必须释放上一条视频 Object URL');
-  assert.match(prepare, /accountId[\s\S]*?draftId[\s\S]*?metadata\.id/, '异步时间轴必须绑定账户、草稿和媒体 ID');
+  assert.match(prepare, /accountId[\s\S]*?draftId[\s\S]*?metadata\.id/, '异步时间轴必须绑定本机分区、草稿和媒体 ID');
   assert.match(prepare, /session\s*!==\s*this\.timelineSession/, '异步读取完成前必须校验当前媒体会话');
 
   assert.doesNotMatch(pointerMove, /updatePreview\s*\(/, '拖动过程不能反复重排并保存整篇草稿');

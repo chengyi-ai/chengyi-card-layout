@@ -78,6 +78,8 @@ class FakeObjectStore {
     });
   }
 
+  getAll() { return this.transaction.request(() => [...this.records.values()].map((r) => structuredClone(r))); }
+
   get(key) {
     return this.transaction.request(() => {
       const record = this.records.get(key);
@@ -138,13 +140,13 @@ class FakeIndexedDB {
   }
 }
 
-test('复合键按账号、草稿、媒体和用途四层隔离', () => {
+test('复合键固定本机并按草稿、媒体和用途隔离', () => {
   const base = { accountId: 'a/b', draftId: 'draft:1', mediaId: 'media|1', role: 'source' };
-  assert.notEqual(buildMediaKey(base), buildMediaKey({ ...base, accountId: 'a' }));
+  assert.equal(buildMediaKey(base), buildMediaKey({ ...base, accountId: 'a' }));
   assert.notEqual(buildMediaKey(base), buildMediaKey({ ...base, draftId: 'draft:2' }));
   assert.notEqual(buildMediaKey(base), buildMediaKey({ ...base, mediaId: 'media|2' }));
   assert.notEqual(buildMediaKey(base), buildMediaKey({ ...base, role: 'poster' }));
-  assert.notEqual(buildDraftKey(base), buildDraftKey({ ...base, accountId: 'another' }));
+  assert.equal(buildDraftKey(base), buildDraftKey({ ...base, accountId: 'another' }));
 });
 
 test('不支持 IndexedDB 时给出明确错误', async () => {
@@ -160,13 +162,13 @@ test('媒体可保存、读取、复制、导出和按草稿删除，且等待�
   const poster = new Blob(['poster-data'], { type: 'image/jpeg' });
 
   await store.put({ ...source, role: 'source', blob: video, metadata: { duration: 5 } });
-  assert.equal(indexedDB.database.completedTransactions, 2, 'put 必须等待内部 get 和写事务都 complete');
+  assert.equal(indexedDB.database.completedTransactions, 3, 'put 必须等待内部 get 和写事务都 complete');
   await store.put({ ...source, role: 'poster', blob: poster });
 
   const saved = await store.get({ ...source, role: 'source' });
   assert.equal(await saved.blob.text(), 'video-data');
   assert.deepEqual(saved.metadata, { duration: 5 });
-  assert.equal(await store.get({ ...source, accountId: 'assistant', role: 'source' }), null);
+  assert.equal((await store.get({ ...source, accountId: 'assistant', role: 'source' })).accountId, 'local');
 
   const listed = await store.listDraft(source);
   assert.deepEqual(listed.map((asset) => asset.role), ['poster', 'source']);
@@ -177,7 +179,7 @@ test('媒体可保存、读取、复制、导出和按草稿删除，且等待�
     { mapMediaId: { 'video-1': 'video-copy' } },
   );
   assert.equal(cloned.length, 2);
-  assert.ok(cloned.every((asset) => asset.accountId === 'assistant' && asset.mediaId === 'video-copy'));
+  assert.ok(cloned.every((asset) => asset.accountId === 'local' && asset.mediaId === 'video-copy'));
 
   const exported = await store.exportDraft({ accountId: 'assistant', draftId: 'draft-copy' });
   assert.equal(exported.schemaVersion, 1);
@@ -192,11 +194,37 @@ test('媒体可保存、读取、复制、导出和按草稿删除，且等待�
 test('拒绝空作用域和非 Blob 数据', async () => {
   const store = new CardMediaStore({ indexedDB: new FakeIndexedDB() });
   await assert.rejects(
-    store.put({ accountId: '', draftId: 'd', mediaId: 'm', role: 'source', blob: new Blob(['x']) }),
-    /accountId 不能为空/,
-  );
-  await assert.rejects(
     store.put({ accountId: 'a', draftId: 'd', mediaId: 'm', role: 'source', blob: 'not-a-blob' }),
     /blob 必须是浏览器 Blob 或 File/,
   );
+});
+
+test('旧媒体分区合并取较新，保留旧素材且迁移只执行一次', async () => {
+  const indexedDB = new FakeIndexedDB();
+  const records = indexedDB.database.records;
+  for (const [owner, time, text] of [['local', 10, 'local'], ['owner-a', 30, 'new'], ['owner-b', 20, 'old']]) {
+    const record = { accountId: owner, draftId: 'd', mediaId: 'm', role: 'source', updatedAt: time, blob: new Blob([text]) };
+    record.key = JSON.stringify([owner, 'd', 'm', 'source']);
+    record.draftKey = JSON.stringify([owner, 'd']);
+    records.set(record.key, record);
+  }
+  const store = new CardMediaStore({ indexedDB });
+  const scope = { draftId: 'd', mediaId: 'm', role: 'source' };
+  assert.equal(await (await store.get(scope)).blob.text(), 'new');
+  assert.equal(records.size, 4);
+  assert.equal(await records.get(JSON.stringify(['owner-b', 'd', 'm', 'source'])).blob.text(), 'old');
+  await store.delete(scope);
+  const reopened = new CardMediaStore({ indexedDB });
+  assert.equal(await reopened.get(scope), null);
+});
+
+test('媒体更新时间相同时优先保留本机版本', async () => {
+  const indexedDB = new FakeIndexedDB();
+  for (const owner of ['old-owner', 'local']) {
+    const key = JSON.stringify([owner, 'd', 'm', 'source']);
+    indexedDB.database.records.set(key, { key, accountId: owner, draftId: 'd', mediaId: 'm', role: 'source', updatedAt: 10, blob: new Blob([owner]) });
+  }
+  const store = new CardMediaStore({ indexedDB });
+  const asset = await store.get({ draftId: 'd', mediaId: 'm', role: 'source' });
+  assert.equal(await asset.blob.text(), 'local');
 });

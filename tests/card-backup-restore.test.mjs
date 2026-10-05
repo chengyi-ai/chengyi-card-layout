@@ -116,8 +116,7 @@ const imageOnlyMerged = merge(current, {
 assert.equal(imageOnlyMerged.activeId, imageOnlyMerged.drafts[0].id);
 
 const restoredStorage = new Map([
-  ["creator-toolkit-active-account-v1", "qa-account"],
-  ["article-card-drafts", JSON.stringify(current)],
+  ["article-card-drafts:local", JSON.stringify(current)],
 ]);
 let flushCalled = false;
 let reloadCalled = false;
@@ -126,7 +125,7 @@ const restoreContext = {
     normalizeCardDraftStore: (store) => store,
     flushCardDrafts: () => {
       flushCalled = true;
-      restoredStorage.set("article-card-drafts", JSON.stringify({
+      restoredStorage.set("article-card-drafts:local", JSON.stringify({
         ...current,
         drafts: [{
           ...current.drafts[0],
@@ -164,16 +163,18 @@ const restoreInput = {
       drafts: {
         schemaVersion: 2,
         activeId: "content-id",
-        drafts: [blankFirstBackup.drafts[1]],
+        accountId: "old-owner",
+        drafts: [{ ...blankFirstBackup.drafts[1], accountId: "old-owner", data: { ...blankFirstBackup.drafts[1].data, accountId: "old-owner" } }],
       },
     }),
   }],
   value: "selected",
 };
 await restoreContext.importDraftBackup(restoreInput);
+assert.ok(!JSON.stringify(JSON.parse(restoredStorage.get("article-card-drafts:local"))).includes("old-owner"));
 assert.equal(flushCalled, true, "restore must flush unsaved editor changes before reading current storage");
 assert.equal(reloadCalled, true, "restore should refresh drafts in the same page");
-const restoredAfterImport = JSON.parse(restoredStorage.get("article-card-drafts"));
+const restoredAfterImport = JSON.parse(restoredStorage.get("article-card-drafts:local"));
 assert.equal(
   restoredAfterImport.drafts.at(-1).data.content,
   "<div>点击恢复前刚编辑的内容</div>",
@@ -204,8 +205,7 @@ class FakeZipBuilder {
 }
 
 const exportStorage = new Map([
-  ["creator-toolkit-active-account-v1", "qa-account"],
-  ["article-card-drafts", JSON.stringify({
+  ["article-card-drafts:local", JSON.stringify({
     schemaVersion: 3,
     activeId: "media-draft",
     drafts: [{
@@ -223,7 +223,7 @@ const exportContext = {
     normalizeCardDraftStore: (store) => store,
     cardMediaStore: {
       listDraft: async ({ accountId, draftId }) => {
-        assert.equal(accountId, "qa-account");
+        assert.equal(accountId, "local");
         assert.equal(draftId, "media-draft");
         return [
           {
@@ -303,6 +303,7 @@ function fakeLoadedZip(manifest, assetBlobs) {
 const v3Manifest = {
   app: "ChengYi Card Layout",
   version: 3,
+  accountId: "old-zip-owner",
   exportedAt: "2026-08-03T00:00:00.000Z",
   drafts: {
     schemaVersion: 3,
@@ -310,6 +311,7 @@ const v3Manifest = {
     drafts: [{
       id: "same-id",
       title: "带视频的历史草稿",
+      accountId: "old-zip-owner",
       data: {
         content: '<div><img data-media-id="clip-1" data-media-draft-id="same-id" data-media-kind="video" data-media-mode="live-photo"></div>',
       },
@@ -323,7 +325,8 @@ const v3Manifest = {
       path: "assets/same-id/clip-1/source",
       mimeType: "video/mp4",
       size: 5,
-      metadata: { duration: 5 },
+      accountId: "old-zip-owner",
+      metadata: { duration: 5, accountId: "old-zip-owner" },
     },
     {
       draftId: "same-id",
@@ -342,8 +345,7 @@ const v3AssetBlobs = new Map([
 ]);
 
 const v3Storage = new Map([
-  ["creator-toolkit-active-account-v1", "qa-account"],
-  ["article-card-drafts", JSON.stringify(current)],
+  ["article-card-drafts:local", JSON.stringify(current)],
 ]);
 const restoreEvents = [];
 const restoredMedia = [];
@@ -368,7 +370,7 @@ const v3RestoreContext = {
   localStorage: {
     getItem: (key) => v3Storage.get(key) ?? null,
     setItem: (key, value) => {
-      if (key === "article-card-drafts") restoreEvents.push("localStorage");
+      if (key === "article-card-drafts:local") restoreEvents.push("localStorage");
       v3Storage.set(key, value);
     },
   },
@@ -386,19 +388,21 @@ await v3RestoreContext.importDraftBackup({
   value: "selected",
 });
 assert.equal(restoredMedia.length, 2);
+assert.ok(restoredMedia.every((asset) => asset.accountId === "local"));
+assert.ok(!JSON.stringify(restoredMedia).includes("old-zip-owner"));
 assert.equal(restoredMedia[0].draftId, restoredMedia[1].draftId);
 assert.equal(restoredMedia[0].mediaId, restoredMedia[1].mediaId);
 assert.notEqual(restoredMedia[0].draftId, "same-id");
 assert.notEqual(restoredMedia[0].mediaId, "clip-1");
 assert.deepEqual(restoreEvents.slice(0, 3), ["media:source", "media:poster", "localStorage"]);
-const v3RestoredStore = JSON.parse(v3Storage.get("article-card-drafts"));
+const v3RestoredStore = JSON.parse(v3Storage.get("article-card-drafts:local"));
+assert.ok(!JSON.stringify(v3RestoredStore).includes("old-zip-owner"));
 assert.match(v3RestoredStore.drafts[0].data.content, new RegExp(`data-media-id="${restoredMedia[0].mediaId}"`));
 assert.match(v3RestoredStore.drafts[0].data.content, new RegExp(`data-media-draft-id="${restoredMedia[0].draftId}"`));
 assert.equal(v3RestoredStore.drafts.at(-1).data.content, "<div>当前内容</div>");
 
 const failedStorage = new Map([
-  ["creator-toolkit-active-account-v1", "qa-account"],
-  ["article-card-drafts", JSON.stringify(current)],
+  ["article-card-drafts:local", JSON.stringify(current)],
 ]);
 let putAttempt = 0;
 const rolledBackDrafts = [];
@@ -432,12 +436,12 @@ const failedRestoreContext = {
   alert: (message) => { failureAlert = message; },
 };
 vm.runInNewContext(backupSource, failedRestoreContext, { filename: "backup-v3-rollback.js" });
-const beforeFailedRestore = failedStorage.get("article-card-drafts");
+const beforeFailedRestore = failedStorage.get("article-card-drafts:local");
 await failedRestoreContext.importDraftBackup({
   files: [{ name: "drafts.zip", type: "application/zip", size: 2048 }],
   value: "selected",
 });
-assert.equal(failedStorage.get("article-card-drafts"), beforeFailedRestore, "media failure must not commit drafts");
+assert.equal(failedStorage.get("article-card-drafts:local"), beforeFailedRestore, "media failure must not commit drafts");
 assert.equal(rolledBackDrafts.length, 1, "already written media must be rolled back");
 assert.match(failureAlert, /草稿恢复失败：模拟素材写入失败/);
 
@@ -459,7 +463,7 @@ assert.match(resetSource, /key\.startsWith\('card-tool-'\)/);
 assert.match(resetSource, /remainingRegistrations\.some/);
 assert.match(resetSource, /retryWrap\.hidden = false;\s+return;/);
 assert.match(resetSource, /location\.replace\(target\.href\)/);
-assert.match(resetSource, /20260915-draft-autosave-v1/g);
+assert.match(resetSource, /20261005-local-drafts-v1/g);
 assert.match(buildSource, /"card-layout-reset\.html"/);
 assert.match(backupSource, /window\.getCardDraftStore/);
 assert.match(backupSource, /window\.replaceCardDraftStore/);
@@ -494,9 +498,9 @@ const indexedRestoreContext = {
   },
   document: { getElementById: () => null },
   localStorage: {
-    getItem: (key) => key === "creator-toolkit-active-account-v1" ? "qa-account" : null,
+    getItem: () => null,
     setItem: (key) => {
-      if (key === "article-card-drafts") throw new Error("恢复不得回退写入 localStorage");
+      if (key === "article-card-drafts:local") throw new Error("恢复不得回退写入 localStorage");
     },
   },
   location: { href: "https://example.com/", replace: () => {} },

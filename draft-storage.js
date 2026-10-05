@@ -10,10 +10,34 @@
     return value == null ? value : JSON.parse(JSON.stringify(value));
   }
 
-  function requiredAccountId(value) {
-    const accountId = String(value || '').trim();
-    if (!accountId) throw new TypeError('accountId 不能为空');
-    return accountId;
+  const LOCAL_PARTITION = 'local';
+
+  // 同 ID 取较新版本；相同时间优先保留本机版本，并尊重较新的删除记录。
+  function mergeLocalStores(stores) {
+    const drafts = new Map();
+    const deletedDrafts = {};
+    let activeId = null;
+    let schemaVersion = 2;
+    for (const store of stores.filter(Boolean)) {
+      if (!Array.isArray(store.drafts)) throw new Error('草稿数据结构不正确');
+      schemaVersion = Math.max(schemaVersion, Number(store.schemaVersion) || 2);
+      activeId ||= store.activeId;
+      for (const [id, time] of Object.entries(store.deletedDrafts || {})) {
+        deletedDrafts[id] = Math.max(Number(deletedDrafts[id]) || 0, Number(time) || 0);
+      }
+      for (const draft of store.drafts || []) {
+        const previous = drafts.get(draft.id);
+        if (!previous || Number(draft.updatedAt || 0) > Number(previous.updatedAt || 0)) {
+          const { accountId, ...localDraft } = clone(draft);
+          drafts.set(draft.id, localDraft);
+        }
+      }
+    }
+    for (const [id, draft] of drafts) {
+      if (deletedDrafts[id] && deletedDrafts[id] >= Number(draft.updatedAt || 0)) drafts.delete(id);
+    }
+    return { schemaVersion, drafts: [...drafts.values()], deletedDrafts,
+      activeId: drafts.has(activeId) ? activeId : ([...drafts.keys()][0] || null) };
   }
 
   function requestResult(request, fallbackMessage) {
@@ -88,8 +112,31 @@
       return this._dbPromise;
     }
 
+    async migrateLegacy() {
+      const database = await this.open();
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const complete = transactionComplete(transaction);
+      const store = transaction.objectStore(STORE_NAME);
+      // 在同一个事务中读取、合并并标记；失败时原分区和迁移标记均不改变。
+      const request = store.getAll();
+      let migrationError = null;
+      request.onsuccess = () => {
+        try {
+          const records = request.result || [];
+          const local = records.find((record) => record.accountId === LOCAL_PARTITION);
+          if (local?.legacyMigrationComplete) return;
+          const stores = [local?.store, ...records.filter((r) => r !== local).map((r) => r.store)];
+          const merged = stores.some(Boolean) ? mergeLocalStores(stores) : null;
+          store.put({ accountId: LOCAL_PARTITION, store: merged,
+            updatedAt: Date.now(), legacyMigrationComplete: true });
+        } catch (error) { migrationError = error; transaction.abort(); }
+      };
+      try { await complete; } catch (error) { throw migrationError || error; }
+    }
+
     async load(accountIdInput) {
-      const accountId = requiredAccountId(accountIdInput);
+      const accountId = LOCAL_PARTITION;
+      await this.migrateLegacy();
       const database = await this.open();
       const transaction = database.transaction(STORE_NAME, 'readonly');
       const complete = transactionComplete(transaction);
@@ -102,10 +149,12 @@
     }
 
     async save(accountIdInput, store) {
-      const accountId = requiredAccountId(accountIdInput);
+      await this.migrateLegacy();
+      const accountId = LOCAL_PARTITION;
       const database = await this.open();
       const record = {
         accountId,
+        legacyMigrationComplete: true,
         updatedAt: Date.now(),
         store: clone(store),
       };
@@ -136,155 +185,9 @@
     }
   }
 
-  class CardDraftCloudSync {
-    constructor(options = {}) {
-      this.endpoint = String(options.endpoint || '/api/card-drafts');
-      this.onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
-      this.onRemoteStore = typeof options.onRemoteStore === 'function' ? options.onRemoteStore : async () => null;
-      this.getLocalStore = typeof options.getLocalStore === 'function' ? options.getLocalStore : () => null;
-      this.accountId = '';
-      this.client = null;
-      this.etag = '';
-      this.timer = null;
-      this.pendingStore = null;
-      this.syncing = false;
-      this.retryDelay = 2500;
-      this.generation = 0;
-    }
-
-    async _client() {
-      if (this.client) return this.client;
-      const config = root.CHENGYI_CLOUD_CONFIG || {};
-      if (!config.supabaseUrl || !config.supabasePublishableKey || !root.supabase?.createClient) return null;
-      this.client = root.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey);
-      return this.client;
-    }
-
-    async _token(expectedAccountId = this.accountId) {
-      const client = await this._client();
-      if (!client) return '';
-      const { data, error } = await client.auth.getSession();
-      if (error) throw error;
-      const session = data?.session;
-      if (!session?.access_token || String(session.user?.id || '') !== String(expectedAccountId || '')) return '';
-      return session.access_token;
-    }
-
-    async _request(method, store, generation = this.generation) {
-      const token = await this._token();
-      if (!token || generation !== this.generation) return { unavailable: true };
-      const headers = {
-        authorization: `Bearer ${token}`,
-        accept: 'application/json',
-      };
-      if (method === 'PUT') {
-        headers['content-type'] = 'application/json';
-        if (this.etag) headers['if-match'] = this.etag;
-      }
-      const response = await fetch(this.endpoint, {
-        method,
-        headers,
-        body: method === 'PUT' ? JSON.stringify({ store }) : undefined,
-        cache: 'no-store',
-      });
-      if (generation !== this.generation) return { stale: true };
-      const payload = response.status === 204 ? null : await response.json().catch(() => null);
-      if (response.status === 401) return { unavailable: true };
-      if (response.status === 409) {
-        this.etag = response.headers.get('etag') || '';
-        return { conflict: true, store: payload?.store || null };
-      }
-      if (!response.ok) throw new Error(payload?.error || `云端草稿请求失败（${response.status}）`);
-      this.etag = response.headers.get('etag') || this.etag;
-      return { store: payload?.store || null };
-    }
-
-    async init(accountIdInput) {
-      const accountId = String(accountIdInput || '').trim();
-      this.generation += 1;
-      const generation = this.generation;
-      clearTimeout(this.timer);
-      this.timer = null;
-      this.pendingStore = null;
-      this.accountId = accountId;
-      this.etag = '';
-      this.retryDelay = 2500;
-      if (!accountId) {
-        this.onStatus('temporary');
-        return null;
-      }
-      this.onStatus('connecting');
-      try {
-        const result = await this._request('GET', null, generation);
-        if (generation !== this.generation || result.stale) return null;
-        if (result.unavailable) {
-          this.onStatus('local-only');
-          return null;
-        }
-        let merged = this.getLocalStore();
-        if (result.store) merged = await this.onRemoteStore(result.store);
-        this.onStatus('connected');
-        if (merged) this.scheduleSave(merged, 100);
-        return merged;
-      } catch (error) {
-        if (generation === this.generation) this.onStatus('offline', error.message || '云端暂不可用');
-        return null;
-      }
-    }
-
-    scheduleSave(store, delay = 1600) {
-      if (!this.accountId || !store) return false;
-      this.pendingStore = clone(store);
-      clearTimeout(this.timer);
-      this.onStatus('pending');
-      this.timer = setTimeout(() => this.flush(), delay);
-      return true;
-    }
-
-    async flush() {
-      clearTimeout(this.timer);
-      this.timer = null;
-      if (this.syncing || !this.pendingStore || !this.accountId) return false;
-      const generation = this.generation;
-      const store = this.pendingStore;
-      this.pendingStore = null;
-      this.syncing = true;
-      this.onStatus('syncing');
-      try {
-        let result = await this._request('PUT', store, generation);
-        if (generation !== this.generation || result.stale) return false;
-        if (result.unavailable) {
-          this.onStatus('local-only');
-          return false;
-        }
-        if (result.conflict) {
-          const merged = await this.onRemoteStore(result.store);
-          result = await this._request('PUT', merged || this.getLocalStore(), generation);
-          if (result.conflict) throw new Error('另一台设备刚刚更新了草稿，将稍后重新合并');
-        }
-        this.retryDelay = 2500;
-        this.onStatus('synced');
-        return true;
-      } catch (error) {
-        if (generation !== this.generation) return false;
-        this.pendingStore = clone(this.getLocalStore() || store);
-        this.onStatus('offline', error.message || '云端同步失败');
-        const retryAfter = this.retryDelay;
-        this.retryDelay = Math.min(this.retryDelay * 2, 30000);
-        this.timer = setTimeout(() => this.flush(), retryAfter);
-        return false;
-      } finally {
-        if (generation === this.generation) {
-          this.syncing = false;
-          if (this.pendingStore && !this.timer) this.timer = setTimeout(() => this.flush(), 200);
-        }
-      }
-    }
-  }
-
   root.CardDraftStorage = Object.freeze({
     CardDraftRepository,
-    CardDraftCloudSync,
+    mergeLocalStores,
     constants: Object.freeze({ databaseName: DB_NAME, databaseVersion: DB_VERSION, storeName: STORE_NAME }),
   });
 })(globalThis);

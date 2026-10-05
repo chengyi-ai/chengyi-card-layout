@@ -2,14 +2,12 @@ import { createServer } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { handleCardDraftRequest } from "./worker/card-draft-handler.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 const ALLOWED_FILES = new Set([
   "index.html",
   "card-layout-reset.html",
-  "cloud-config.js",
   "app.js",
   "backup.css",
   "backup.js",
@@ -30,7 +28,6 @@ const ALLOWED_FILES = new Set([
   "vendor/jszip.min.js",
   "vendor/mp4-muxer.js",
   "vendor/mp4box.all.min.js",
-  "vendor/supabase.js",
 ]);
 
 const MIME_TYPES = {
@@ -96,90 +93,14 @@ function sendText(res, status, body, headers = {}) {
   res.end(body);
 }
 
-function requestOrigin(req, env) {
-  const configured = String(env.PUBLIC_ORIGIN || "").trim();
-  if (configured) {
-    const parsed = new URL(configured);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error("PUBLIC_ORIGIN must use http or https");
-    }
-    return parsed.origin;
-  }
-  const host = String(req.headers.host || "127.0.0.1");
-  if (/^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?$/i.test(host)) {
-    return `http://${host}`;
-  }
-  return "http://127.0.0.1";
-}
-
-function fetchHeadersFromNode(req) {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(req.headers)) {
-    if (Array.isArray(value)) {
-      for (const entry of value) headers.append(name, entry);
-    } else if (value !== undefined) {
-      headers.set(name, value);
-    }
-  }
-  return headers;
-}
-
-async function sendFetchResponse(res, response) {
-  const headers = {};
-  response.headers.forEach((value, name) => { headers[name] = value; });
-  const body = Buffer.from(await response.arrayBuffer());
-  res.writeHead(response.status, headers);
-  res.end(body);
-}
-
-async function handleCardDraftRoute(req, res, env, cardDraftHandler) {
-  try {
-    const body = req.method === "PUT" ? await readRequestBody(req) : undefined;
-    if (req.method !== "PUT") req.resume();
-    const origin = requestOrigin(req, env);
-    const request = new Request(new URL(req.url || "/api/card-drafts", origin), {
-      method: req.method,
-      headers: fetchHeadersFromNode(req),
-      body,
-    });
-    const response = await cardDraftHandler(request, {
-      CARD_DRAFTS: env.CARD_DRAFTS,
-      SUPABASE_URL: env.SUPABASE_URL,
-      SUPABASE_PUBLISHABLE_KEY: env.SUPABASE_PUBLISHABLE_KEY,
-    });
-    await sendFetchResponse(res, response);
-  } catch {
-    if (!res.headersSent) sendText(res, 500, "Local server error");
-    else res.destroy();
-  }
-}
-
-function readRequestBody(req) {
-  return new Promise((resolveBody, rejectBody) => {
-    const chunks = [];
-    req.on("data", chunk => chunks.push(chunk));
-    req.on("end", () => resolveBody(Buffer.concat(chunks)));
-    req.on("aborted", () => rejectBody(new Error("request aborted")));
-    req.on("error", rejectBody);
-  });
-}
-
 export function createCardLayoutServer({
   rootDir = DEFAULT_ROOT,
-  env = process.env,
-  cardDraftHandler = handleCardDraftRequest,
 } = {}) {
   const configuredRoot = resolve(rootDir);
   const rootRealPromise = realpath(configuredRoot).catch(() => null);
 
   return createServer(async (req, res) => {
     try {
-      const rawPath = String(req.url || "/").split("?", 1)[0];
-      if (rawPath === "/api/card-drafts") {
-        await handleCardDraftRoute(req, res, env, cardDraftHandler);
-        return;
-      }
-
       const relativePath = resolveAllowedPath(req.url || "/");
       if (!relativePath) {
         sendText(res, 404, "Not found");

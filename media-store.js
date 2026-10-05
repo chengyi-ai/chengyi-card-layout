@@ -11,7 +11,7 @@ function requiredScopePart(value, name) {
 
 function normalizeScope(scope, needsMedia = true) {
   const normalized = {
-    accountId: requiredScopePart(scope?.accountId, 'accountId'),
+    accountId: 'local',
     draftId: requiredScopePart(scope?.draftId, 'draftId'),
   };
   if (needsMedia) {
@@ -21,7 +21,7 @@ function normalizeScope(scope, needsMedia = true) {
   return normalized;
 }
 
-// JSON 数组不会因账号、草稿或文件名里包含常见分隔符而产生键碰撞。
+// JSON 数组避免草稿或文件名中的分隔符产生键碰撞。
 export function buildMediaKey(scope) {
   const value = normalizeScope(scope, true);
   return JSON.stringify([value.accountId, value.draftId, value.mediaId, value.role]);
@@ -84,6 +84,7 @@ export class CardMediaStore {
       : globalThis.indexedDB;
     this.dbName = String(options.dbName || CARD_MEDIA_DB_NAME);
     this._dbPromise = null;
+    this._migrationPromise = null;
   }
 
   async open() {
@@ -131,9 +132,45 @@ export class CardMediaStore {
     this._dbPromise = null;
   }
 
+  async migrateLegacy() {
+    if (this._migrationPromise) return this._migrationPromise;
+    this._migrationPromise = (async () => {
+      const database = await this.open();
+      const transaction = database.transaction(CARD_MEDIA_STORE_NAME, 'readwrite');
+      const complete = transactionComplete(transaction);
+      const store = transaction.objectStore(CARD_MEDIA_STORE_NAME);
+      const request = store.getAll();
+      let migrationError = null;
+      request.onsuccess = () => {
+        try {
+          const records = request.result || [];
+          if (records.some((r) => r.key === 'local-migration-v1')) return;
+          const selected = new Map();
+          // 相同时间优先保留本机素材。
+          records.sort((a, b) => Number(b.accountId === 'local') - Number(a.accountId === 'local'));
+          for (const record of records) {
+            if (!record.draftId || !record.mediaId || !record.role) continue;
+            const key = buildMediaKey(record);
+            const previous = selected.get(key);
+            if (!previous || Number(record.updatedAt || 0) > Number(previous.updatedAt || 0)) {
+              selected.set(key, record);
+            }
+          }
+          for (const [key, record] of selected) {
+            store.put({ ...record, accountId: 'local', key, draftKey: buildDraftKey(record) });
+          }
+          store.put({ key: 'local-migration-v1', migratedAt: Date.now() });
+        } catch (error) { migrationError = error; transaction.abort(); }
+      };
+      try { await complete; } catch (error) { throw migrationError || error; }
+    })().catch((error) => { this._migrationPromise = null; throw error; });
+    return this._migrationPromise;
+  }
+
   async put({ accountId, draftId, mediaId, role, blob, metadata = null }) {
     const scope = normalizeScope({ accountId, draftId, mediaId, role }, true);
     assertBlob(blob);
+    await this.migrateLegacy();
     const database = await this.open();
     const existing = await this.get(scope);
     const now = Date.now();
@@ -159,6 +196,7 @@ export class CardMediaStore {
 
   async get(scopeInput) {
     const scope = normalizeScope(scopeInput, true);
+    await this.migrateLegacy();
     const database = await this.open();
     const transaction = database.transaction(CARD_MEDIA_STORE_NAME, 'readonly');
     const complete = transactionComplete(transaction);
@@ -170,6 +208,7 @@ export class CardMediaStore {
 
   async delete(scopeInput) {
     const scope = normalizeScope(scopeInput, true);
+    await this.migrateLegacy();
     const database = await this.open();
     const transaction = database.transaction(CARD_MEDIA_STORE_NAME, 'readwrite');
     const complete = transactionComplete(transaction);
@@ -181,6 +220,7 @@ export class CardMediaStore {
 
   async listDraft(scopeInput) {
     const scope = normalizeScope(scopeInput, false);
+    await this.migrateLegacy();
     const database = await this.open();
     const transaction = database.transaction(CARD_MEDIA_STORE_NAME, 'readonly');
     const complete = transactionComplete(transaction);
@@ -198,6 +238,7 @@ export class CardMediaStore {
   async deleteDraft(scopeInput) {
     const assets = await this.listDraft(scopeInput);
     if (!assets.length) return 0;
+    await this.migrateLegacy();
     const database = await this.open();
     const transaction = database.transaction(CARD_MEDIA_STORE_NAME, 'readwrite');
     const complete = transactionComplete(transaction);
@@ -213,6 +254,7 @@ export class CardMediaStore {
     const target = normalizeScope(targetScope, false);
     const assets = await this.listDraft(source);
     if (!assets.length) return [];
+    await this.migrateLegacy();
     const database = await this.open();
     const now = Date.now();
     const mapMediaId = options.mapMediaId;

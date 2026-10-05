@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 
 const [appSource, backupSource] = await Promise.all([
   readFile(new URL("../app.js", import.meta.url), "utf8"),
@@ -227,84 +228,10 @@ test("新粘贴、拖入或文件选择的图片继承当前默认样式", () =>
   );
 });
 
-test("草稿存储固定到页面打开时的账户，并监听账户切换", () => {
-  const articleCardClassIndex = appSource.indexOf("class ArticleCardApp");
-  assert.ok(articleCardClassIndex >= 0, "找不到 ArticleCardApp");
-  const articleCardSource = appSource.slice(articleCardClassIndex);
-  const articleConstructor = extractBlock(
-    articleCardSource,
-    /\bconstructor\s*\(\s*\)\s*\{/,
-    "ArticleCardApp.constructor",
-  );
-  const loadStore = extractBlock(
-    articleCardSource,
-    /\b_loadStore\s*\(\s*\)\s*\{/,
-    "ArticleCardApp._loadStore",
-  );
-  const saveStore = extractBlock(
-    articleCardSource,
-    /\b_saveStore\s*\(\s*\)\s*\{/,
-    "ArticleCardApp._saveStore",
-  );
-  const switchAccount = extractBlock(
-    articleCardSource,
-    /\b_switchAccount\s*\([^)]*\)\s*\{/,
-    "ArticleCardApp._switchAccount",
-  );
-
-  assert.match(
-    articleConstructor,
-    /this\.accountId\s*=\s*cardAccountId\s*\(\s*\)/,
-    "ArticleCardApp 必须在初始化时固定 accountId",
-  );
-  assert.match(
-    articleConstructor,
-    /new storageAPI\.CardDraftRepository\s*\(/,
-    "ArticleCardApp 必须初始化 IndexedDB 草稿仓库",
-  );
-  assert.match(
-    articleConstructor,
-    /new storageAPI\.CardDraftCloudSync\s*\(/,
-    "ArticleCardApp 必须初始化云端草稿同步",
-  );
-  assert.match(
-    loadStore,
-    /cardStorageKey\s*\(\s*['"]article-card-drafts['"]\s*,\s*(?:this\.)?accountId\s*\)/,
-    "_loadStore 必须使用页面初始化时固定的 accountId",
-  );
-  if (/cardStorageKey\s*\(\s*['"]article-card-drafts['"]\s*,\s*accountId\s*\)/.test(loadStore)) {
-    assert.match(
-      loadStore,
-      /const\s+accountId\s*=\s*this\.accountId/,
-      "_loadStore 的局部 accountId 必须来自页面初始化时固定的 this.accountId",
-    );
-  }
-  assert.match(
-    saveStore,
-    /cardStorageKey\s*\(\s*['"]article-card-drafts['"]\s*,\s*this\.accountId\s*\)/,
-    "_saveStore 必须使用页面初始化时固定的 accountId",
-  );
-  assert.match(
-    articleCardSource,
-    /addEventListener\s*\(\s*['"]storage['"]/,
-    "ArticleCardApp 必须监听跨标签页账户切换",
-  );
-  assert.match(
-    articleCardSource,
-    /CREATOR_ACTIVE_ACCOUNT_KEY/,
-    "storage 监听必须只响应活动账户键",
-  );
-  assert.match(
-    switchAccount,
-    /this\.accountId/,
-    "_switchAccount 必须比较或更新固定 accountId",
-  );
-  const flushIndex = switchAccount.indexOf("_writeActiveDraft");
-  const rebindIndex = switchAccount.indexOf("this.accountId =");
-  assert.ok(
-    flushIndex >= 0 && rebindIndex > flushIndex,
-    "切换账户时必须先把当前草稿保存回旧账户，再绑定新 accountId",
-  );
+test("草稿固定在本机分区，无账户切换或云同步", () => {
+  assert.match(appSource, /const CARD_LOCAL_PARTITION = 'local'/);
+  assert.doesNotMatch(appSource, /CardDraftCloudSync|_switchAccount|CREATOR_ACTIVE_ACCOUNT_KEY/);
+  assert.match(appSource, /draftRepository.subscribe/);
 });
 
 test("备份导入复用产品草稿清洗/迁移入口", () => {
@@ -364,7 +291,7 @@ test("损坏的草稿 store 会阻止后续自动保存，不能被空 store 覆
   assert.match(
     loadStore,
     /this\.draftRepository\.load\s*\(\s*accountId\s*\)/,
-    "_loadStore 必须优先从 IndexedDB 读取当前账户草稿",
+    "_loadStore 必须优先从 IndexedDB 读取本机草稿",
   );
   assert.match(
     loadStore,
@@ -385,7 +312,7 @@ test("损坏的草稿 store 会阻止后续自动保存，不能被空 store 覆
   assert.match(
     saveStore,
     /this\.draftRepository\.save\s*\(\s*this\.accountId/,
-    "_saveStore 必须把当前账户草稿写入 IndexedDB",
+    "_saveStore 必须把本机草稿写入 IndexedDB",
   );
   assert.match(
     saveStore,
@@ -394,44 +321,11 @@ test("损坏的草稿 store 会阻止后续自动保存，不能被空 store 覆
   );
 });
 
-test("退出账户后不会读取已迁移的无账户旧草稿", () => {
-  const articleCardClassIndex = appSource.indexOf("class ArticleCardApp");
-  assert.ok(articleCardClassIndex >= 0, "找不到 ArticleCardApp");
-  const loadStore = extractBlock(
-    appSource.slice(articleCardClassIndex),
-    /\b_loadStore\s*\(\s*\)\s*\{/,
-    "ArticleCardApp._loadStore",
-  );
-
-  assert.doesNotMatch(
-    loadStore,
-    /!accountId\s*\|\|/,
-    "退出账户时不能再把无账户状态视为旧草稿迁移资格",
-  );
-  const ownedMigrationChecks =
-    loadStore.match(/accountId\s*&&\s*legacyOwner\s*===\s*accountId/g) || [];
-  assert.ok(
-    ownedMigrationChecks.length >= 2,
-    "无论旧 store 还是旧单草稿，迁移都必须显式要求非空 accountId 且 owner 一致",
-  );
-
-  const firstBaseRead = loadStore.indexOf("localStorage.getItem(scopedKey)");
-  const loggedOutGuard = loadStore.match(
-    /if\s*\(\s*!\s*(?:this\.)?accountId\s*\)\s*(?:\{[\s\S]{0,500}?return\b|return\b)/,
-  );
-  const gatedRead = loadStore.match(
-    /(?:let|const)\s+raw\s*=\s*(?:this\.)?accountId\s*\?\s*localStorage\.getItem\s*\(\s*scopedKey\s*\)/,
-  );
-  const guardedReadBlock = loadStore.match(
-    /if\s*\(\s*(?:this\.)?accountId\s*\)\s*\{[\s\S]{0,500}?localStorage\.getItem\s*\(\s*scopedKey\s*\)/,
-  );
-  const guardBeforeRead =
-    loggedOutGuard && (firstBaseRead < 0 || loggedOutGuard.index < firstBaseRead);
-
-  assert.ok(
-    guardBeforeRead || gatedRead || guardedReadBlock,
-    "accountId 为空时不得读取 base article-card-drafts；必须早退或对读取进行 accountId 门控",
-  );
+test("旧 localStorage 迁移保留原分区并在成功后标记", () => {
+  const loadStore = extractBlock(appSource, /\b_loadStore\s*\(\s*\)\s*\{/, "_loadStore");
+  assert.match(loadStore, /localStorage.key\(i\)/);
+  assert.match(loadStore, /localStorage.setItem\(migrationKey, '1'\)/);
+  assert.doesNotMatch(loadStore, /removeItem/);
 });
 
 test("单图 setImageFrame 只修改选中图片，不改变新图片默认样式", () => {
@@ -596,6 +490,50 @@ test("跨设备合并保留较新草稿，删除墓碑不会让旧稿复活", ()
   assert.match(
     appSource,
     /this\.store\.deletedDrafts\[deletedDraftId\]\s*=\s*deletedAt/,
-    "删除草稿必须写入墓碑，供云端合并抑制复活",
+    "删除草稿必须写入墓碑，供本机迁移与标签页合并抑制复活",
   );
+});
+
+test("localStorage 多账户和单草稿合并、保留源数据，失败可重试", async () => {
+  const storageSource = await readFile(new URL('../draft-storage.js', import.meta.url), 'utf8');
+  const context = { BroadcastChannel: null };
+  vm.runInNewContext(storageSource, context);
+  const records = new Map();
+  const store = (time, title) => ({ drafts: [{ id: 'd', title, updatedAt: time, data: { content: title } }], activeId: 'd' });
+  records.set('article-card-drafts:owner-a', JSON.stringify(store(30, '较新')));
+  records.set('article-card-drafts:owner-b', JSON.stringify(store(20, '较早')));
+  records.set('article-card-draft', JSON.stringify({ content: '最早单草稿' }));
+  const originals = new Map(records);
+  let saved = store(10, '本机');
+  let failWrite = true;
+  Object.assign(context, {
+    CARD_DRAFT_SCHEMA_VERSION: 9,
+    localStorage: {
+      get length() { return records.size; },
+      key: (i) => [...records.keys()][i],
+      getItem: (key) => records.get(key) ?? null,
+      setItem: (key, value) => records.set(key, value),
+    },
+    cardStorageKey: (base) => `${base}:local`,
+    normalizeCardDraftStore: (value) => {
+      if (!Array.isArray(value.drafts)) throw new Error('invalid');
+      return value;
+    },
+    mergeCardDraftStores: (a, b) => context.CardDraftStorage.mergeLocalStores([a, b]),
+  });
+  const body = extractBlock(appSource, /\b_loadStore\s*\(\s*\)\s*\{/, '_loadStore');
+  const load = vm.runInNewContext(`(async function() {${body}})`, context);
+  const app = { accountId: 'local', draftRepository: {
+    load: async () => saved,
+    save: async (_scope, value) => { if (failWrite) throw new Error('模拟迁移失败'); saved = value; },
+  } };
+  assert.equal((await load.call(app)).drafts.find((d) => d.id === 'd').title, '较新');
+  assert.equal(records.has('article-card-local-migration-v1'), false);
+  failWrite = false;
+  const merged = await load.call(app);
+  assert.equal(merged.drafts.length, 2);
+  assert.equal(records.get('article-card-local-migration-v1'), '1');
+  for (const [key, raw] of originals) assert.equal(records.get(key), raw);
+  saved = { drafts: [], activeId: null };
+  assert.equal((await load.call(app)).drafts.length, 0, '迁移后的删除不能从原数据复活');
 });

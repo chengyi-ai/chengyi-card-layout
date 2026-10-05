@@ -53,5 +53,5 @@ test('删除裁剪后保留图片宽度、样式选择和删除图片能力', ()
   assert.match(app, /setImageFrame\(frame\)/);
   assert.match(app, /_removeImageUndoable\(img\)/);
   assert.match(app, /CARD_DRAFT_SCHEMA_VERSION = 9/);
-  assert.match(html, /20260915-draft-autosave-v1/g);
+  assert.match(html, /20261005-local-drafts-v1/g);
 });

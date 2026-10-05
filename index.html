@@ -6,7 +6,7 @@
 <title>ChengYi · 图文排版工具</title>
 
 <!-- PWA -->
-<link rel="manifest" href="manifest.json?v=20260915-draft-autosave-v1">
+<link rel="manifest" href="manifest.json?v=20261005-local-drafts-v1">
 <meta name="theme-color" content="#111111">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -30,9 +30,9 @@ if ('caches' in window) {
   });
 }
 </script>
-<link rel="stylesheet" href="style.css?v=20260915-draft-autosave-v1">
-<link rel="stylesheet" href="backup.css?v=20260915-draft-autosave-v1">
-<link rel="stylesheet" href="readability.css?v=20260915-draft-autosave-v1">
+<link rel="stylesheet" href="style.css?v=20261005-local-drafts-v1">
+<link rel="stylesheet" href="backup.css?v=20261005-local-drafts-v1">
+<link rel="stylesheet" href="readability.css?v=20261005-local-drafts-v1">
 <script src="vendor/html2canvas.min.js?v=20260816-local-vendor-v1"></script>
 <script src="vendor/jszip.min.js?v=20260816-local-vendor-v1"></script>
 </head>
@@ -189,8 +189,11 @@ if ('caches' in window) {
           <p>直接粘贴文字和图片，或拖入图片、MP4、MOV。选中图片后，上方会出现对应的属性栏。</p>
         </div>
 
+        <div class="draft-backup-row"><button type="button" onclick="exportDraftBackup()">↓ 导出备份</button><button type="button" onclick="document.getElementById('draftBackupInput').click()">↑ 导入备份</button><small id="draftBackupStatus">建议定期备份</small></div>
+        <input type="file" id="draftBackupInput" accept=".json,.zip,application/json,application/zip" hidden onchange="importDraftBackup(this)">
+        <p class="local-draft-notice">草稿只保存在这台设备的浏览器里，请定期导出备份；换设备时用导入恢复。</p>
         <details class="work-meta-panel">
-          <summary><span>作品信息与默认样式</span><small>作者、日期、卡片版式、图片样式、草稿备份</small></summary>
+          <summary><span>作品信息与默认样式</span><small>作者、日期、卡片版式、图片样式</small></summary>
           <div class="work-meta-content">
             <div class="form-group">
               <label for="avatarInput">作者头像</label>
@@ -221,8 +224,6 @@ if ('caches' in window) {
               <small>只影响之后导入的普通图片；自由拼贴新增图片固定为正常样式</small>
             </div>
 
-            <div class="draft-backup-row"><button type="button" onclick="exportDraftBackup()">↓ 备份草稿</button><button type="button" onclick="document.getElementById('draftBackupInput').click()">↑ 恢复草稿</button><small id="draftBackupStatus">建议定期备份</small></div>
-            <input type="file" id="draftBackupInput" accept=".json,.zip,application/json,application/zip" hidden onchange="importDraftBackup(this)">
             <p class="work-meta-note">内容过长时自动分页，每页 3:4 比例（1500×2000px）。包含视频时会按页序导出 MP4 或 Live Photo 发布包。</p>
           </div>
         </details>
@@ -265,13 +266,11 @@ if ('caches' in window) {
 
 <script src="vendor/mp4box.all.min.js"></script>
 <script src="vendor/mp4-muxer.js"></script>
-<script src="cloud-config.js?v=20260915-draft-autosave-v1"></script>
-<script src="vendor/supabase.js?v=20260816-local-vendor-v1"></script>
-<script src="draft-storage.js?v=20260915-draft-autosave-v1"></script>
-<script type="module" src="video-timeline.js?v=20260915-draft-autosave-v1"></script>
-<script src="editor-highlight.js?v=20260915-draft-autosave-v1"></script>
-<script src="collage-layout.js?v=20260915-draft-autosave-v1"></script>
-<script src="app.js?v=20260915-draft-autosave-v1"></script>
-<script src="backup.js?v=20260915-draft-autosave-v1"></script>
+<script src="draft-storage.js?v=20261005-local-drafts-v1"></script>
+<script type="module" src="video-timeline.js?v=20261005-local-drafts-v1"></script>
+<script src="editor-highlight.js?v=20261005-local-drafts-v1"></script>
+<script src="collage-layout.js?v=20261005-local-drafts-v1"></script>
+<script src="app.js?v=20261005-local-drafts-v1"></script>
+<script src="backup.js?v=20261005-local-drafts-v1"></script>
 </body>
 </html>

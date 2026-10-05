@@ -41,9 +41,9 @@ function extractBlock(source, signature, label) {
 test('自由拼贴入口和缓存版本完整接入', () => {
   assert.match(html, /onclick="createImageCollage\(\)"/);
   assert.match(html, /id="collageInput"[^>]*multiple/);
-  assert.match(html, /collage-layout\.js\?v=20260915-draft-autosave-v1/);
-  assert.match(html, /app\.js\?v=20260915-draft-autosave-v1/);
-  assert.match(reset, /20260915-draft-autosave-v1/g);
+  assert.match(html, /collage-layout\.js\?v=20261005-local-drafts-v1/);
+  assert.match(html, /app\.js\?v=20261005-local-drafts-v1/);
+  assert.match(reset, /20261005-local-drafts-v1/g);
 });
 
 test('选中自由拼贴图片后，剪贴板图片直接加入当前拼贴', () => {
@@ -460,7 +460,7 @@ test('兜底删除支持 Command+Z 原位恢复和 Command+Shift+Z 重做', () =
   assert.deepEqual(nativeCalls, ['rehydrate']);
 
   assert.match(app, /addEventListener\('beforeinput',[\s\S]*?historyUndo[\s\S]*?historyRedo[\s\S]*?_clearFallbackDeleteTransaction\(\)/);
-  assert.match(app, /_applyData\(data\)[\s\S]*?this\.editorManager\._clearFallbackDeleteTransaction\(\)/, '切换草稿或账户时不能恢复旧页面节点');
+  assert.match(app, /_applyData\(data\)[\s\S]*?this\.editorManager\._clearFallbackDeleteTransaction\(\)/, '切换草稿时不能恢复旧页面节点');
 });
 
 test('光标紧挨自由拼贴时会执行一次可撤销整块删除，而不是只吞按键', () => {
@@ -593,7 +593,7 @@ test('含自由拼贴的稀疏页面从顶部排版，短文字页仍可垂直�
   assert.equal(paginate.call(createEngine(), [{ type: 'p' }], () => '')[0].centerContent, true);
 });
 
-test('异步压图期间切换账户或草稿不会写入失效目标', () => {
+test('异步压图期间切换草稿不会写入失效目标', () => {
   assert.match(app, /pendingCollageContext/);
   assert.match(app, /requestContext\.accountId !== cardAccountId\(\)/);
   assert.match(app, /target && \(!target\.isConnected \|\| !this\.editor\.contains\(target\)\)/);

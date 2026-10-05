@@ -1,72 +1,34 @@
 # ChengYi 图文排版工具
 
-独立项目，拆自 `chengyi-creator-toolkit` commit `4b6c9cc`。本仓库只保留图文排版工具、云端草稿同步接口与对应测试；没有复制原工具箱的 `.openai/hosting.json`，上线前需要新建独立的 OpenAI/Sites 项目。
+纯本地、无登录的图文排版工具，拆自 `chengyi-creator-toolkit` commit `4b6c9cc`。没有账户系统、云端草稿或 API；编辑与图片、视频、Live Photo 导出均在浏览器中完成。运行依赖随站点提供，不使用公共 CDN。
 
-## 本地开发
+## 本地开发与验证
 
 ```bash
 npm run dev
-# 或
-npm start
-```
-
-默认监听 `http://127.0.0.1:4173/`。本地静态服务只允许图文工具运行所需的白名单文件；`.env`、`tests/`、`server.mjs` 等私有或开发文件不会被暴露。
-
-## 测试
-
-```bash
+# 或 npm start
 npm test
-```
-
-只运行从源仓库带出的 `tests/card-*.test.mjs` 图文工具相关测试。
-
-## 构建
-
-```bash
 npm run build
 ```
 
-构建会：
+默认地址 `http://127.0.0.1:4173/`，可在 `.env` 配置 `HOST`、`PORT`。本地服务仅提供静态白名单文件，拒绝开发文件、路径穿越与符号链接；仅允许 GET、HEAD。
 
-1. 校验本地 vendored 第三方依赖的 SHA-256；
-2. 生成 `dist/` 静态文件；
-3. 生成 `dist/server/index.js` Sites Worker；
-4. 复制 `worker/card-draft-handler.mjs` 到 `dist/server/card-draft-handler.mjs`。
+## 草稿与备份
 
-`dist/server/index.js` 只包含图文工具静态资源和 `/api/card-drafts` 路由，不包含原工具箱其它业务接口。
+草稿只保存在这台设备的浏览器里，请定期导出备份；换设备时用导入恢复。清除站点数据、更换浏览器或站点域名均不能自动带走草稿。
 
-## 环境变量与绑定
+草稿正文使用 IndexedDB `chengyi-card-drafts-v2`，视频及封面使用 `chengyi-card-media-v1`，统一写入 `local` 分区。旧数据库保留原 keyPath `accountId` 以兼容历史数据，这个字段现在固定为 `local`，不表示登录账户。
 
-前端登录配置在 `cloud-config.js`：
+首次读取会把本源下旧账户分区合并进本机分区。同草稿 ID 按 `updatedAt` 取较新版本；相同时间优先本机版本。删除记录取较新时间，删除时间不早于草稿更新时间时保留删除。素材按草稿 ID、媒体 ID、用途合并，同键取较新 `updatedAt`，相同时间优先本机。迁移标记随 IndexedDB 写入事务提交，旧分区不删除；后续打开不会重新迁移导致草稿复活。旧 localStorage 多草稿及单草稿也会迁移，原账户 key 保留；成功后标记，失败保留原数据供重试。IndexedDB 不可用时正文可回退 localStorage，视频存储仍需要 IndexedDB。
 
-- `supabaseUrl`
-- `supabasePublishableKey`
+“导出备份”生成 JSON；含视频素材时生成包含 `manifest.json` 和素材的 ZIP。“导入备份”兼容旧版 1/2 JSON 与 3 ZIP，忽略备份的 `accountId`、`userId`、`ownerId` 字段，草稿与素材均落到本机分区。恢复作为独立副本加入，遇到 ID 重复会重命名，并同步更新视频引用。素材写入失败时回滚本次素材，不提交草稿。
 
-本地服务和 Sites Worker 草稿接口使用：
+从旧站（博主工具箱图文工具）迁移：**旧站导出备份 → 新站导入备份**。跨域不能直接读取旧站浏览器数据库；含视频务必使用 ZIP。
 
-- `SUPABASE_URL`：Supabase Project URL；未设置时沿用源工具箱项目默认值。
-- `SUPABASE_PUBLISHABLE_KEY`：Supabase publishable key；未设置时沿用源工具箱项目默认值。
-- `PUBLIC_ORIGIN`：本地把 Node 请求适配为 Fetch Request 时可选的源站地址。
-- `PORT` / `HOST`：本地开发服务端口与监听地址。
-- `CARD_DRAFTS`：Cloudflare R2 绑定名，用于 `/api/card-drafts` 存储用户草稿。
+## 纯静态部署
 
-这个独立项目与原工具箱共用同一个 Supabase 项目登录；`/api/card-drafts` 会通过 Supabase `/auth/v1/user` 校验 Bearer token 后，按用户 ID 哈希写入 R2 `card-drafts/<sha256>.json`。图文草稿不写入 Supabase 业务表，因此不需要为本项目额外建表或运行 schema。
+构建校验第三方依赖 SHA-256，并输出纯静态 `dist/`，不生成 Worker，也不需要 R2 或认证环境变量。之后将 `dist/` 作为静态站点目录部署即可；本次改造不执行部署。
 
-## 部署提示
+构建提供 `dist/_headers`，声明 nosniff、Referrer-Policy、X-Frame-Options、Permissions-Policy、CSP 和缓存策略。未验证 Sites 静态托管是否解析 `_headers`：如托管平台不支持，应在平台响应头设置中配置相同规则；静态文件本身无法保证 HTTP 安全头生效。本地开发服务继续返回这些安全头。
 
-不要复用原工具箱的 Sites project_id。本仓库刻意不创建 `.openai/hosting.json`；首次部署前请为图文排版工具新建 Sites 项目，并配置 R2 绑定 `CARD_DRAFTS`。
-
-## 路径调整
-
-源仓库中 `tools/card-layout/` 的内容已提升到项目根目录，因此：
-
-- `/tools/card-layout/index.html` → `/index.html`
-- `../../cloud-config.js` → `cloud-config.js`
-- `../../vendor/supabase.js` → `vendor/supabase.js`
-- `tools/card-layout/vendor/*` → `vendor/*`
-- Service Worker / reset 页清理范围从旧 `/tools/card-layout/` 调整为当前独立站点 origin。
-- `manifest.json` 保持根路径相对 scope：`start_url: "./index.html"`、`scope: "./"`。
-
-## 关于 `card-layout-reset.html`
-
-仍保留。它用于清理源工具箱旧版图文工具遗留的缓存优先 Service Worker 和 `card-tool-*` Cache Storage，然后跳回根路径 `index.html`。该页面不会清理用户草稿。
+`manifest.json` 使用相对根路径。保留 `card-layout-reset.html` 和注销旧 Service Worker 的逻辑，清理旧 `card-tool-*` 缓存，不清理用户草稿。

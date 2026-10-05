@@ -89,11 +89,8 @@ assert.match(appSource, /addEventListener\('pagehide'/);
 assert.match(appSource, /this\.draftRepository\.subscribe/);
 assert.match(appSource, /_reloadExternalDraftStore/);
 assert.match(appSource, /_mergeExternalDraftStore/);
-assert.match(backupSource, /请先登录账户，再备份当前账户的草稿/);
-assert.match(backupSource, /请先登录账户，再恢复到当前账户/);
-assert.match(backupSource, /尚未备份当前账户草稿/);
+assert.match(backupSource, /尚未导出本机草稿备份/);
 assert.match(backupSource, /window\.flushCardDrafts\(\) === false/);
-assert.match(appSource, /window\.updateDraftBackupStatus\?\.\(\)/);
 
 const scriptVersion = htmlSource.match(/app\.js\?v=([^"']+)/)?.[1];
 assert.ok(scriptVersion);

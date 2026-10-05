@@ -3,8 +3,7 @@ const CARD_W = 750;
 const CARD_H = 1000;
 const CARD_PADDING_X = 24;
 const CARD_PADDING_Y = 36;
-const CREATOR_ACTIVE_ACCOUNT_KEY = 'creator-toolkit-active-account-v1';
-const CREATOR_LEGACY_OWNER_KEY = 'creator-toolkit-legacy-owner-v1';
+const CARD_LOCAL_PARTITION = 'local';
 const CARD_DRAFT_SCHEMA_VERSION = 9;
 const CARD_NORMAL_IMAGE_DEFAULT_MIGRATION_VERSION = 8;
 const CARD_DRAFT_CONTENT_LIMIT = 12_000_000;
@@ -16,7 +15,7 @@ const CARD_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/quicktime']);
 const CARD_VIDEO_EXTENSIONS = /\.(?:mp4|mov)$/i;
 const CARD_VIDEO_MODES = new Set(['video', 'live-photo']);
 const CARD_VIDEO_DURATIONS = new Set([3, 5]);
-const CARD_VIDEO_TIMELINE_URL = './video-timeline.js?v=20260915-draft-autosave-v1';
+const CARD_VIDEO_TIMELINE_URL = './video-timeline.js?v=20261005-local-drafts-v1';
 
 let cardMediaStorePromise = null;
 let livePhotoEnginePromise = null;
@@ -28,6 +27,7 @@ async function getCardMediaStore() {
       if (typeof Store !== 'function') throw new Error('媒体存储模块未正确加载');
       const store = new Store();
       await store.open();
+      await store.migrateLegacy();
       return store;
     }).catch((error) => {
       cardMediaStorePromise = null;
@@ -55,12 +55,11 @@ async function getLivePhotoEngine() {
 }
 
 function cardAccountId() {
-  return localStorage.getItem(CREATOR_ACTIVE_ACCOUNT_KEY) || '';
+  return CARD_LOCAL_PARTITION;
 }
 
-function cardStorageKey(base, accountOverride) {
-  const accountId = accountOverride === undefined ? cardAccountId() : String(accountOverride || '');
-  return accountId ? `${base}:${accountId}` : base;
+function cardStorageKey(base) {
+  return `${base}:${CARD_LOCAL_PARTITION}`;
 }
 
 window.cardStorageKey = cardStorageKey;
@@ -2290,7 +2289,7 @@ class EditorManager {
     if (files.length === 0) return;
     const api = collageLayoutAPI();
     if (requestContext.accountId !== cardAccountId() || requestContext.draftId !== this.app.getActiveDraftId()) {
-      alert('当前账户或草稿已经切换，本次图片未加入。请在目标草稿中重新选择。');
+      alert('当前草稿已经切换，本次图片未加入。请在目标草稿中重新选择。');
       return;
     }
     const target = requestedCollageId
@@ -2311,7 +2310,7 @@ class EditorManager {
     const dataURLs = await Promise.all(selectedFiles.map((file) => compressImageFile(file, 1500, 0.85)));
     if (requestContext.accountId !== cardAccountId() || requestContext.draftId !== this.app.getActiveDraftId()
       || (target && (!target.isConnected || !this.editor.contains(target)))) {
-      alert('图片处理期间账户、草稿或拼贴区发生了变化，本次图片未加入。请重新选择。');
+      alert('图片处理期间草稿或拼贴区发生了变化，本次图片未加入。请重新选择。');
       return;
     }
     const liveCount = target ? target.querySelectorAll(':scope > .collage-item').length : 0;
@@ -2450,7 +2449,7 @@ class EditorManager {
     const accountId = this.app.accountId;
     const draftId = this.app.getActiveDraftId();
     if (!accountId || !draftId) {
-      alert('请先登录账户再插入视频；素材会保存在当前设备，备份草稿时会一并导出。');
+      alert('请先新建草稿再插入视频；素材会保存在当前设备，备份草稿时会一并导出。');
       return;
     }
     this.app._setDraftStatus('正在读取视频并保存到本机…');
@@ -3499,7 +3498,7 @@ class Exporter {
     if (!window.JSZip) throw new Error('JSZip 未加载，无法打包视频内容');
     const accountId = String(mediaContext.accountId || '');
     const activeDraftId = String(mediaContext.draftId || '');
-    if (!accountId || !activeDraftId) throw new Error('当前草稿账户信息不完整，无法读取视频素材');
+    if (!accountId || !activeDraftId) throw new Error('当前草稿信息不完整，无法读取视频素材');
     const store = await getCardMediaStore();
     const engine = await getLivePhotoEngine();
     const capability = engine.checkCapability?.();
@@ -3654,29 +3653,20 @@ class ArticleCardApp {
     this.pendingStoreSnapshot = null;
     this.localSavePromise = null;
     this.lastLocalSavedAt = 0;
-    this.cloudState = 'idle';
     this.initialized = false;
     this.exporting = false;
     this.debouncedUpdate = debounce(() => this.updatePreview(), 100);
     const storageAPI = window.CardDraftStorage;
-    if (!storageAPI?.CardDraftRepository || !storageAPI?.CardDraftCloudSync) {
+    if (!storageAPI?.CardDraftRepository) {
       throw new Error('草稿存储组件未正确加载');
     }
     this.draftRepository = new storageAPI.CardDraftRepository();
-    this.cloudSync = new storageAPI.CardDraftCloudSync({
-      onStatus: (state, detail) => this._handleCloudStatus(state, detail),
-      getLocalStore: () => this.store,
-      onRemoteStore: (remoteStore) => this._applyRemoteDraftStore(remoteStore),
-    });
     this.unsubscribeDraftUpdates = this.draftRepository.subscribe((message) => {
       if (message.accountId === this.accountId) this._reloadExternalDraftStore();
     });
 
     // 防抖：手机弹出键盘也会触发 resize，避免每次都全量重排
     window.addEventListener('resize', debounce(() => this.updatePreview(), 200));
-    window.addEventListener('storage', (event) => {
-      if (event.key === CREATOR_ACTIVE_ACCOUNT_KEY) this._switchAccount(event.newValue || '');
-    });
     window.addEventListener('pagehide', () => {
       if (!window.cardDraftRestoreInProgress) this.saveDraft();
     });
@@ -3695,11 +3685,13 @@ class ArticleCardApp {
     this._setDraftStatus('正在读取草稿…', 'saving');
     this.store = await this._loadStore();
     this._restoreLoadedStore();
+    try { await getCardMediaStore(); } catch (error) {
+      this._setDraftStatus(`⚠ ${error.message}，请保留旧素材并稍后重试`, 'error');
+    }
     this._initDate();
     this.initialized = true;
     this.editorManager.editor.setAttribute('contenteditable', 'true');
     this.updatePreview();
-    await this.cloudSync.init(this.accountId);
     this.editorManager.editor.focus();
   }
 
@@ -3751,40 +3743,35 @@ class ArticleCardApp {
     this.storageLoadError = '';
     const accountId = this.accountId;
 
-    // 未登录时只提供临时编辑，不读取或写入历史无账户 key，避免退出账户后看到上一位用户的草稿。
-    if (!accountId) return emptyStore;
-
     let localStore = null;
-    let localKeys = [];
+    const migrationKey = 'article-card-local-migration-v1';
+    const scopedKey = cardStorageKey('article-card-drafts', accountId);
     try {
-      const scopedKey = cardStorageKey('article-card-drafts', accountId);
-      const raw = localStorage.getItem(scopedKey);
-      const legacyOwner = localStorage.getItem(CREATOR_LEGACY_OWNER_KEY);
-      if (raw) {
-        localStore = normalizeCardDraftStore(JSON.parse(raw));
-        localKeys.push(scopedKey);
-      } else if (accountId && legacyOwner === accountId) {
-        const legacyRaw = localStorage.getItem('article-card-drafts');
-        if (legacyRaw) {
-          localStore = normalizeCardDraftStore(JSON.parse(legacyRaw));
-          localKeys.push('article-card-drafts');
+      const keys = [scopedKey];
+      if (!localStorage.getItem(migrationKey)) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key === 'article-card-drafts' || key?.startsWith('article-card-drafts:')) keys.push(key);
         }
       }
-
-      // 迁移更早期的单草稿格式；只有明确属于当前账户时才允许读取。
-      if (!localStore && accountId && legacyOwner === accountId) {
+      for (const key of new Set(keys)) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        try {
+          const candidate = normalizeCardDraftStore(JSON.parse(raw));
+          localStore = localStore ? mergeCardDraftStores(localStore, candidate) : candidate;
+        } catch (error) { this.storageLoadError = error.message || '旧草稿读取失败'; }
+      }
+      if (!localStorage.getItem(migrationKey)) {
         const legacy = localStorage.getItem('article-card-draft');
         if (legacy) {
-          const store = { ...emptyStore, drafts: [] };
-          const draft = this._makeDraft(JSON.parse(legacy));
-          store.drafts.push(draft);
-          store.activeId = draft.id;
-          localStore = normalizeCardDraftStore(store);
-          localKeys.push('article-card-draft');
+          const draft = { id: 'legacy-single-draft', title: '旧草稿', updatedAt: 1, data: JSON.parse(legacy) };
+          const candidate = normalizeCardDraftStore({ ...emptyStore, drafts: [draft], activeId: draft.id });
+          localStore = localStore ? mergeCardDraftStores(localStore, candidate) : candidate;
         }
       }
     } catch (error) {
-      this.storageLoadError = error instanceof Error ? error.message : '草稿读取失败';
+      this.storageLoadError = error.message || '草稿读取失败';
     }
 
     let indexedStore = null;
@@ -3807,7 +3794,7 @@ class ArticleCardApp {
     if (localStore) {
       try {
         await this.draftRepository.save(accountId, selected);
-        localKeys.forEach((key) => localStorage.removeItem(key));
+        if (!this.storageLoadError) localStorage.setItem(migrationKey, '1');
       } catch (error) {
         this.storageLoadError = `旧草稿已读取，但迁移失败：${error.message || '未知错误'}`;
       }
@@ -3838,10 +3825,6 @@ class ArticleCardApp {
       this._setDraftStatus(`⚠ ${this.storageLoadError || '草稿读取失败'}，已停止自动保存`, 'error');
       return Promise.resolve(false);
     }
-    if (!this.accountId) {
-      this._setDraftStatus('未登录 · 本页内容仅临时保留', 'error');
-      return Promise.resolve(false);
-    }
     this.store.schemaVersion = CARD_DRAFT_SCHEMA_VERSION;
     this.store.deletedDrafts ||= {};
     this.pendingStoreSnapshot = JSON.parse(JSON.stringify(this.store));
@@ -3861,7 +3844,6 @@ class ArticleCardApp {
           this.lastSaveFailed = false;
           this.saveFailureAlerted = false;
           this.lastLocalSavedAt = Date.now();
-          this.cloudSync.scheduleSave(snapshot);
         } catch (indexedError) {
           // 极少数不支持 IndexedDB 的浏览器仍允许用旧缓存临时兜底。
           try {
@@ -3905,28 +3887,8 @@ class ArticleCardApp {
   _renderSaveStatus() {
     if (this.lastSaveFailed) return;
     if (this.localSavePending) return this._setDraftStatus('正在保存…', 'saving');
-    if (!this.accountId) return this._setDraftStatus('未登录 · 本页内容仅临时保留', 'error');
-    if (this.cloudState === 'syncing' || this.cloudState === 'pending' || this.cloudState === 'connecting') {
-      return this._setDraftStatus('本机已保存 · 云端同步中…', 'syncing');
-    }
-    if (this.cloudState === 'synced' || this.cloudState === 'connected') {
-      return this._setDraftStatus(`云端已同步 ${this._timeLabel()}`, 'synced');
-    }
     const suffix = this.lastLocalSavedAt ? ` ${this._timeLabel(this.lastLocalSavedAt)}` : '';
-    return this._setDraftStatus(`本机已保存${suffix} · 登录后可云同步`, 'saved');
-  }
-
-  _handleCloudStatus(state, detail = '') {
-    this.cloudState = state;
-    if (state === 'offline') {
-      this._setDraftStatus(`本机已保存 · 云端稍后重试${detail ? `（${detail}）` : ''}`, 'saved');
-      return;
-    }
-    if (state === 'temporary') {
-      this._setDraftStatus('未登录 · 本页内容仅临时保留', 'error');
-      return;
-    }
-    this._renderSaveStatus();
+    return this._setDraftStatus(`本机已保存${suffix}`, 'saved');
   }
 
   _activeDraft() {
@@ -3952,11 +3914,6 @@ class ArticleCardApp {
   }
 
   saveDraft() {
-    const activeAccountId = cardAccountId();
-    if (activeAccountId !== this.accountId) {
-      this._switchAccount(activeAccountId);
-      return Promise.resolve(false);
-    }
     return this._writeActiveDraft();
   }
 
@@ -4008,37 +3965,9 @@ class ArticleCardApp {
     } catch (_) {}
   }
 
-  async _applyRemoteDraftStore(remoteStore) {
-    if (!remoteStore || !this.accountId) return this.store;
-    const merged = mergeCardDraftStores(this.store, remoteStore);
-    const before = JSON.stringify(this.store);
-    this.store = merged;
-    if (JSON.stringify(merged) !== before) {
-      this._restoreLoadedStore();
-      await this._saveStore();
-      this.updatePreview();
-    }
-    return this.store;
-  }
-
-  async _switchAccount(nextAccountId) {
-    const normalizedAccountId = String(nextAccountId || '');
-    if (normalizedAccountId === this.accountId) return;
-    await this._writeActiveDraft();
-    this.accountId = normalizedAccountId;
-    this.store = await this._loadStore();
-    this._restoreLoadedStore(true);
-    this._initDate();
-    this.updatePreview();
-    window.updateDraftBackupStatus?.();
-    await this.cloudSync.init(this.accountId);
-  }
-
-  _restoreLoadedStore(freshAccount = false) {
+  _restoreLoadedStore() {
     if (this.store.drafts.length === 0) {
-      const data = freshAccount
-        ? normalizeDraftData({ content: '', authorName: '程意', pubDate: '', avatar: '', filename: 'article-card', defaultImageFrame: '' })
-        : this._collectData();
+      const data = this._collectData();
       const draft = this._makeDraft(data);
       this.store.drafts.push(draft);
       this.store.activeId = draft.id;
@@ -4070,10 +3999,6 @@ class ArticleCardApp {
   }
 
   async switchDraft(id) {
-    if (cardAccountId() !== this.accountId) {
-      await this._switchAccount(cardAccountId());
-      return;
-    }
     if (id === this.store.activeId) return;
     if (!await this.saveDraft()) return;  // 先保存当前；失败时不能丢下当前草稿
     this.store.activeId = id;
@@ -4085,7 +4010,6 @@ class ArticleCardApp {
   }
 
   async newDraft() {
-    if (cardAccountId() !== this.accountId) await this._switchAccount(cardAccountId());
     if (!await this.saveDraft()) return;  // 先保存当前
     // 新草稿：保留作者身份，清空内容
     const data = this._collectData();
@@ -4104,10 +4028,6 @@ class ArticleCardApp {
   }
 
   async deleteDraft() {
-    if (cardAccountId() !== this.accountId) {
-      await this._switchAccount(cardAccountId());
-      return;
-    }
     const draft = this._activeDraft();
     if (!draft) return;
     if (!confirm(`确定删除草稿「${draft.title}」吗？`)) return;
@@ -4254,9 +4174,8 @@ class ArticleCardApp {
   }
 
   async replaceDraftStore(nextStore) {
-    if (!this.accountId) throw new Error('请先登录账户再恢复草稿');
     this.store = normalizeCardDraftStore(nextStore);
-    await this._saveStore();
+    if (!await this._saveStore()) throw new Error('恢复草稿保存失败');
     this._restoreLoadedStore();
     this.updatePreview();
     return this.store;
@@ -4281,7 +4200,6 @@ window.replaceCardDraftStore = async (store) => {
 };
 window.reloadCardDrafts = async () => {
   if (!app) return false;
-  if (cardAccountId() !== app.accountId) await app._switchAccount(cardAccountId());
   else {
     app.store = await app._loadStore();
     if (app.storageWriteBlocked) return false;
