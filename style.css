@@ -812,12 +812,6 @@ body { background: var(--cy-100); color: var(--cy-950); }
   width: 450px; min-width: 450px; padding: 24px 28px 42px; gap: 17px;
   background: var(--cy-50); border-right: 1px solid var(--cy-300);
 }
-.tool-back {
-  display: inline-flex; align-items: center; align-self: flex-start;
-  color: var(--cy-600); text-decoration: none; font-size: 12px;
-  padding: 7px 11px; border-radius: 999px; margin-bottom: 2px;
-}
-.tool-back:hover { background: var(--cy-200); color: var(--cy-950); }
 .tool-identity { font-family: var(--cy-serif); font-size: 23px; line-height: 1; font-weight: 400; }
 .tool-identity small { display: block; font-family: inherit; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size: 8px; letter-spacing: 2.3px; color: var(--cy-500); margin-top: 7px; font-weight: 700; }
 .tool-heading { padding: 22px 0 5px; border-top: 1px solid var(--cy-200); }
@@ -907,25 +901,9 @@ body {
 .workspace-brand {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 9px;
-}
-
-.workspace-brand .tool-back {
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: center;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--cy-300);
-  border-radius: 50%;
-  background: #fff;
-  color: var(--cy-800);
-  font-size: 16px;
 }
 
 .workspace-brand .tool-identity {
@@ -1401,7 +1379,6 @@ input:focus-visible,
   }
 
   .workspace-brand { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
-  .workspace-brand .tool-back { width: 44px; height: 44px; }
   .workspace-brand .tool-identity,
   .workspace-brand .tool-heading p,
   .workspace-brand .tool-heading > span { display: none; }

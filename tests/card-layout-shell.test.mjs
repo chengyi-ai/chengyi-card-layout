@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [html, css, app, reset, dashboard] = await Promise.all([
+const [html, css, app, reset] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../card-layout-reset.html', import.meta.url), 'utf8'),
-  readFile(new URL('../dashboard.js', import.meta.url), 'utf8'),
 ]);
 
 const countMatches = (source, pattern) => (source.match(pattern) || []).length;
@@ -140,13 +139,11 @@ test('桌面顶部栏压缩高度，同时保留手机端 44px 触控尺寸', ()
   assert.ok(pxValue(previewHeading, 'min-height') <= 44);
   assert.ok(verticalPadding(previewHeading) <= 12);
 
-  const mobileBack = extractRule(mobileCss, '.workspace-brand .tool-back');
   const mobileSelect = extractRule(mobileCss, '.workspace-titlebar .draft-bar select');
   const mobileDraftButton = extractRule(mobileCss, '.workspace-titlebar .draft-bar button');
   const mobileExportButton = extractRule(mobileCss, '.workspace-export .export-btn');
   const mobileCommandButton = extractRule(mobileCss, '.workspace-topbar .toolbar button');
   const mobileVideoSelect = extractRule(mobileCss, '.workspace-topbar .video-settings-row select,\n  .workspace-topbar .video-settings-row input[type="number"]');
-  assert.ok(pxValue(mobileBack, 'width') >= 44 && pxValue(mobileBack, 'height') >= 44);
   assert.ok(pxValue(mobileSelect, 'min-height') >= 44);
   assert.ok(pxValue(mobileSelect, 'font-size') >= 16);
   assert.ok(pxValue(mobileDraftButton, 'min-height') >= 44);
@@ -172,7 +169,6 @@ test('缓存版本在入口、动态模块和重置链接中保持一致', () =>
   const [version] = versions;
   assert.match(app, new RegExp(`video-timeline\\.js\\?v=${version}`));
   assert.equal(countMatches(reset, new RegExp(version, 'g')), 2, '重置页的两处版本必须同步');
-  assert.equal(countMatches(dashboard, new RegExp(`card-layout-reset\\.html\\?v=${version}`, 'g')), 2, '首页两处入口必须同步');
 });
 
 test('手机预览控件只在预览打开时显示，并恢复原滚动位置', () => {

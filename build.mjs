@@ -62,7 +62,6 @@ await verifyVendorFiles();
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
 for (const file of assetFiles) await copyAsset(file);
-await cp("supabase", "dist/supabase", { recursive: true });
 await verifyVendorFiles("dist");
 
 const cardHtml = await readFile("dist/index.html", "utf8");

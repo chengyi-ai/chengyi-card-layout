@@ -50,7 +50,7 @@ npm run build
 - `PORT` / `HOST`：本地开发服务端口与监听地址。
 - `CARD_DRAFTS`：Cloudflare R2 绑定名，用于 `/api/card-drafts` 存储用户草稿。
 
-这个独立项目与原工具箱共用同一个 Supabase 项目登录；`/api/card-drafts` 会通过 Supabase `/auth/v1/user` 校验 Bearer token 后，按用户 ID 哈希写入 R2 `card-drafts/<sha256>.json`。
+这个独立项目与原工具箱共用同一个 Supabase 项目登录；`/api/card-drafts` 会通过 Supabase `/auth/v1/user` 校验 Bearer token 后，按用户 ID 哈希写入 R2 `card-drafts/<sha256>.json`。图文草稿不写入 Supabase 业务表，因此不需要为本项目额外建表或运行 schema。
 
 ## 部署提示
 

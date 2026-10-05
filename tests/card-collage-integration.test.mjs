@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, html, css, reset, dashboard] = await Promise.all([
+const [app, html, css, reset] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
   readFile(new URL('../card-layout-reset.html', import.meta.url), 'utf8'),
-  readFile(new URL('../dashboard.js', import.meta.url), 'utf8'),
 ]);
 
 function extractBlock(source, signature, label) {
@@ -45,7 +44,6 @@ test('自由拼贴入口和缓存版本完整接入', () => {
   assert.match(html, /collage-layout\.js\?v=20260915-draft-autosave-v1/);
   assert.match(html, /app\.js\?v=20260915-draft-autosave-v1/);
   assert.match(reset, /20260915-draft-autosave-v1/g);
-  assert.match(dashboard, /card-layout-reset\.html\?v=20260915-draft-autosave-v1/g);
 });
 
 test('选中自由拼贴图片后，剪贴板图片直接加入当前拼贴', () => {

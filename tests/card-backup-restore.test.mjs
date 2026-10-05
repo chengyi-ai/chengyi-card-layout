@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-const [backupSource, appSource, workerSource, resetSource, dashboardSource, buildSource] = await Promise.all([
+const [backupSource, appSource, workerSource, resetSource, buildSource] = await Promise.all([
   readFile(new URL("../backup.js", import.meta.url), "utf8"),
   readFile(new URL("../app.js", import.meta.url), "utf8"),
   readFile(new URL("../sw.js", import.meta.url), "utf8"),
   readFile(new URL("../card-layout-reset.html", import.meta.url), "utf8"),
-  readFile(new URL("../dashboard.js", import.meta.url), "utf8"),
   readFile(new URL("../build.mjs", import.meta.url), "utf8"),
 ]);
 
@@ -461,7 +460,6 @@ assert.match(resetSource, /remainingRegistrations\.some/);
 assert.match(resetSource, /retryWrap\.hidden = false;\s+return;/);
 assert.match(resetSource, /location\.replace\(target\.href\)/);
 assert.match(resetSource, /20260915-draft-autosave-v1/g);
-assert.match(dashboardSource, /card-layout-reset\.html\?v=20260915-draft-autosave-v1/g);
 assert.match(buildSource, /"card-layout-reset\.html"/);
 assert.match(backupSource, /window\.getCardDraftStore/);
 assert.match(backupSource, /window\.replaceCardDraftStore/);
