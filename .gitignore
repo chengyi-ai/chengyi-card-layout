@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.env
+.DS_Store
+.openai/hosting.json

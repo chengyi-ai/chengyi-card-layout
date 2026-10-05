@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ChengYi · 图文排版工具</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json?v=20260915-draft-autosave-v1">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="卡片">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+
+<script>
+// 旧版本使用缓存优先的 Service Worker，可能长期保留已经修复的排版代码。
+// 新版主动退出该离线缓存，但不清除 localStorage，用户草稿会完整保留。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations
+      .filter((registration) => new URL(registration.scope).origin === location.origin)
+      .forEach((registration) => registration.unregister());
+  });
+}
+if ('caches' in window) {
+  caches.keys().then((keys) => {
+    keys.filter((key) => key.startsWith('card-tool-')).forEach((key) => caches.delete(key));
+  });
+}
+</script>
+<link rel="stylesheet" href="style.css?v=20260915-draft-autosave-v1">
+<link rel="stylesheet" href="backup.css?v=20260915-draft-autosave-v1">
+<link rel="stylesheet" href="readability.css?v=20260915-draft-autosave-v1">
+<script src="vendor/html2canvas.min.js?v=20260816-local-vendor-v1"></script>
+<script src="vendor/jszip.min.js?v=20260816-local-vendor-v1"></script>
+</head>
+<body>
+<div class="workspace-shell">
+  <header class="workspace-topbar" aria-label="排版工具栏">
+    <div class="workspace-titlebar">
+      <div class="workspace-brand">
+        <a class="tool-back" href="/" aria-label="返回工具箱">←</a>
+        <div class="tool-identity"><b>ChengYi</b><small>CREATOR TOOLKIT</small></div>
+        <div class="tool-heading"><span>LOCAL TOOL</span><h2>图文排版工具</h2><p>写作、排版与成品预览都在同一个工作台。</p></div>
+      </div>
+
+      <div class="workspace-draft" aria-label="草稿管理">
+        <span class="workspace-field-label">当前草稿</span>
+        <div class="draft-bar">
+          <select id="draftSelect" aria-label="选择草稿" onchange="switchDraft(this.value)"></select>
+          <button type="button" onclick="newDraft()" title="新建草稿">＋ 新建</button>
+          <button type="button" class="draft-del-btn" onclick="deleteDraft()" title="删除当前草稿" aria-label="删除当前草稿">🗑</button>
+        </div>
+      </div>
+
+      <div class="workspace-export" aria-label="导出设置">
+        <label class="workspace-filename" for="exportFilename"><span>导出名称</span><input type="text" class="filename-input" id="exportFilename" value="article-card" placeholder="输入文件名（不含扩展名）"></label>
+        <button type="button" class="export-btn" onclick="exportImage()">📥 导出全部</button>
+        <div class="export-progress" id="exportProgress" role="status" aria-live="polite">正在导出...</div>
+      </div>
+    </div>
+
+    <div class="command-bar-shell" aria-label="常用命令">
+      <div class="toolbar" role="toolbar" aria-label="排版命令">
+        <div class="command-group" aria-label="编辑历史">
+          <span class="command-group-label">编辑</span>
+          <div class="command-group-actions">
+            <button type="button" onclick="undoEdit()" title="Ctrl+Z">↩ 撤销</button>
+            <button type="button" onclick="redoEdit()" title="Ctrl+Shift+Z">↪ 重做</button>
+          </div>
+        </div>
+        <div class="command-group" aria-label="文字样式">
+          <span class="command-group-label">文字</span>
+          <div class="command-group-actions">
+            <button type="button" onclick="toggleBold()" title="Ctrl+B"><b>B</b> 加粗</button>
+            <button type="button" onclick="toggleHighlight()" title="Ctrl+Shift+H"><span style="background:#FFF3B0;padding:0 3px;border-radius:2px">🖍</span> 标记</button>
+          </div>
+        </div>
+        <div class="command-group" aria-label="插入内容">
+          <span class="command-group-label">插入</span>
+          <div class="command-group-actions">
+            <button type="button" onclick="insertImageFromFile()">📷 图片</button>
+            <button type="button" onclick="createImageCollage()" title="选中拼贴内图片后可直接粘贴新图；也可多选图片新建">🧩 自由拼贴</button>
+            <button type="button" onclick="insertVideoFromFile()">🎬 视频 / 实况</button>
+            <button type="button" onclick="insertPageBreak()" title="Ctrl+Enter">📄 分页</button>
+          </div>
+        </div>
+        <div class="command-group" aria-label="内容工具">
+          <span class="command-group-label">内容</span>
+          <div class="command-group-actions">
+            <button type="button" id="copyTextBtn" onclick="copyTextOnly()">📋 复制文字</button>
+            <button type="button" class="command-danger" onclick="clearContent()">🗑 清空</button>
+          </div>
+        </div>
+        <button type="button" class="command-preview-button" aria-controls="previewArea" aria-expanded="false" onclick="openMobilePreview()">👁 预览</button>
+      </div>
+    </div>
+
+    <div class="property-deck" aria-label="所选内容属性">
+      <div class="img-resize-bar" id="imgResizeBar">
+        <span class="property-deck-title">所选内容</span>
+        <div class="img-bar-row">
+          <span id="imgScaleLabel">整体缩放：</span>
+          <input type="range" id="imgWidthSlider" min="20" max="100" value="100" aria-label="图片整体等比缩放" oninput="resizeSelectedImage(this.value)">
+          <span id="imgWidthLabel">100%</span>
+        </div>
+        <small class="img-scale-hint" id="imgScaleHint">以图片中心为基准等比缩放，内部文字和图表一起缩小，不裁切。</small>
+        <div class="img-bar-row">
+          <span>图片样式：</span>
+          <button type="button" class="img-frame-btn" data-frame="" onclick="setImageFrame('')">正常</button>
+          <button type="button" class="img-frame-btn" data-frame="shadow" onclick="setImageFrame('shadow')">投影</button>
+          <button type="button" class="img-frame-btn" data-frame="polaroid" onclick="setImageFrame('polaroid')">相框</button>
+          <button type="button" class="img-frame-btn" data-frame="outline" onclick="setImageFrame('outline')">描边</button>
+          <button type="button" class="img-frame-btn" data-frame="blue-border" onclick="setImageFrame('blue-border')">蓝边</button>
+        </div>
+        <div class="collage-settings" id="collageSettings" hidden>
+          <div class="img-bar-row">
+            <span>拼贴高度：</span>
+            <input type="range" id="collageHeightSlider" min="220" max="680" step="10" value="440" oninput="setSelectedCollageHeight(this.value)">
+            <span id="collageHeightLabel">440 px</span>
+          </div>
+          <div class="collage-action-row">
+            <button type="button" onclick="addImagesToCollage()">＋ 从文件加入</button>
+            <button type="button" id="collageLayerBackward" onclick="moveCollageItemLayer('backward')">下移一层</button>
+            <button type="button" id="collageLayerForward" onclick="moveCollageItemLayer('forward')">上移一层</button>
+            <button type="button" class="collage-danger" onclick="removeSelectedCollageImage()">删除图片</button>
+            <button type="button" class="collage-danger" onclick="removeSelectedCollage()">删除整个拼贴区</button>
+          </div>
+          <small>选中拼贴图片后，复制新图并按 Command+V 可直接加入；也可点“从文件加入”。直接拖动改变位置，拖右下角圆点缩放；选中图片后点右上角 × 可单独删除。方向键微调，Shift＋方向键大步移动。</small>
+        </div>
+        <div class="video-settings" id="videoSettings" hidden>
+          <div class="img-bar-row video-settings-row">
+            <span>输出模式：</span>
+            <select id="mediaOutputMode" onchange="updateSelectedVideoSettings()">
+              <option value="video">视频</option>
+              <option value="live-photo">Live Photo（Beta）</option>
+            </select>
+            <span>时长：</span>
+            <select id="mediaDuration" onchange="updateSelectedVideoSettings()">
+              <option value="3">3 秒</option>
+              <option value="5">5 秒</option>
+            </select>
+          </div>
+          <div class="media-timeline" id="mediaTimeline" hidden>
+            <div class="media-timeline-preview-shell">
+              <video id="mediaTimelineVideo" muted playsinline preload="metadata" aria-label="当前时间点画面预览"></video>
+              <span class="media-timeline-preview-badge"><span id="mediaTimelinePreviewTime">0:00.0</span> 画面</span>
+              <span class="media-timeline-loading" id="mediaTimelineLoading">正在读取视频画面…</span>
+            </div>
+            <div class="media-timeline-heading">
+              <strong>截取区间</strong>
+              <span>拖动黄色选区选择片段，点击其他位置预览画面</span>
+            </div>
+            <div class="media-timeline-track" id="mediaTimelineTrack" tabindex="0" aria-label="视频截取时间轴，点击预览对应画面">
+              <div class="media-timeline-frames" id="mediaTimelineFrames" aria-hidden="true"></div>
+              <div class="media-timeline-shade media-timeline-shade-start" id="mediaTimelineShadeStart" aria-hidden="true"></div>
+              <div class="media-timeline-shade media-timeline-shade-end" id="mediaTimelineShadeEnd" aria-hidden="true"></div>
+              <div class="media-timeline-selection" id="mediaTimelineSelection" data-timeline-handle="move" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="移动所选视频片段">
+                <span class="media-timeline-handle media-timeline-handle-start" data-timeline-handle="start" aria-hidden="true"></span>
+                <span class="media-timeline-handle media-timeline-handle-end" data-timeline-handle="end" aria-hidden="true"></span>
+              </div>
+              <div class="media-timeline-playhead" id="mediaTimelinePlayhead" aria-hidden="true"></div>
+            </div>
+            <div class="media-timeline-values" aria-live="polite">
+              <span>开始 <output id="mediaTimelineStartLabel">0:00.0</output></span>
+              <span>结束 <output id="mediaTimelineEndLabel">0:05.0</output></span>
+              <span>时长 <output id="mediaTimelineDurationLabel">5.0 秒</output></span>
+            </div>
+          </div>
+          <div class="img-bar-row video-settings-row">
+            <label for="mediaStart">开始时间：</label>
+            <input id="mediaStart" type="number" min="0" step="0.1" value="0" onchange="updateSelectedVideoSettings()">
+            <span>秒</span>
+            <label class="media-sound-label"><input id="mediaSound" type="checkbox" checked onchange="updateSelectedVideoSettings()"> 保留声音</label>
+          </div>
+          <small id="mediaLocalStatus">视频素材仅保存在当前设备；备份草稿时会一并带走素材。</small>
+          <small class="media-live-hint" id="mediaLiveHint" hidden>Live Photo 为首版功能：Mac 解压后，在“照片”中导入 .pvt；正式发小红书前请先用 iPhone 实测一次。</small>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="app">
+    <section class="editor" aria-label="文章编辑区">
+      <div class="editor-pane-inner">
+        <div class="writing-heading">
+          <div><span>WRITING CANVAS</span><h2>文章内容</h2></div>
+          <p>直接粘贴文字和图片，或拖入图片、MP4、MOV。选中图片后，上方会出现对应的属性栏。</p>
+        </div>
+
+        <details class="work-meta-panel">
+          <summary><span>作品信息与默认样式</span><small>作者、日期、卡片版式、图片样式、草稿备份</small></summary>
+          <div class="work-meta-content">
+            <div class="form-group">
+              <label for="avatarInput">作者头像</label>
+              <div class="avatar-upload">
+                <div class="avatar-preview"><img id="avatarImg" src="" alt=""></div>
+                <input type="file" accept="image/*" id="avatarInput" onchange="handleAvatar(this)">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="authorName">作者名称</label>
+                <input type="text" id="authorName" value="程意" oninput="updatePreview()">
+              </div>
+              <div class="form-group">
+                <label for="pubDate">发布日期</label>
+                <input type="text" id="pubDate" value="" oninput="updatePreview()">
+              </div>
+            </div>
+
+            <div class="default-frame-row" aria-label="普通图片默认样式">
+              <span>普通图片默认样式：</span>
+              <button type="button" class="default-frame-btn active" data-default-frame="" onclick="setDefaultImageFrame('')">正常</button>
+              <button type="button" class="default-frame-btn" data-default-frame="shadow" onclick="setDefaultImageFrame('shadow')">投影</button>
+              <button type="button" class="default-frame-btn" data-default-frame="polaroid" onclick="setDefaultImageFrame('polaroid')">相框</button>
+              <button type="button" class="default-frame-btn" data-default-frame="outline" onclick="setDefaultImageFrame('outline')">描边</button>
+              <button type="button" class="default-frame-btn" data-default-frame="blue-border" onclick="setDefaultImageFrame('blue-border')">蓝边</button>
+              <small>只影响之后导入的普通图片；自由拼贴新增图片固定为正常样式</small>
+            </div>
+
+            <div class="draft-backup-row"><button type="button" onclick="exportDraftBackup()">↓ 备份草稿</button><button type="button" onclick="document.getElementById('draftBackupInput').click()">↑ 恢复草稿</button><small id="draftBackupStatus">建议定期备份</small></div>
+            <input type="file" id="draftBackupInput" accept=".json,.zip,application/json,application/zip" hidden onchange="importDraftBackup(this)">
+            <p class="work-meta-note">内容过长时自动分页，每页 3:4 比例（1500×2000px）。包含视频时会按页序导出 MP4 或 Live Photo 发布包。</p>
+          </div>
+        </details>
+
+        <div class="writing-panel">
+          <div class="rich-editor" id="contentEditor" contenteditable="true" aria-label="文章内容编辑器"></div>
+          <div class="editor-statusbar">
+            <span id="wordCount">0 字</span>
+            <span id="draftSaveStatus" class="draft-save-status" role="status" aria-live="polite">正在读取草稿…</span>
+            <span class="shortcut-hint">Ctrl+B 加粗 · Ctrl+Shift+H 标记 · Ctrl+E 导出</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="preview-pane" aria-label="实时成品预览">
+      <div class="preview-pane-heading"><div><span>LIVE PREVIEW</span><strong>实时成品预览</strong></div><small>右侧始终显示最终导出效果</small></div>
+      <div class="preview-area" id="previewArea" role="region" aria-label="实时成品预览"></div>
+    </aside>
+  </main>
+</div>
+
+<!-- 移动端预览关闭按钮 -->
+<button type="button" class="mobile-close-btn" aria-controls="previewArea" onclick="closeMobilePreview()" aria-label="关闭预览">✕</button>
+
+<!-- 移动端页码指示器 -->
+<div class="preview-indicator" id="previewIndicator"></div>
+
+<!-- 移动端浮动预览按钮 -->
+<button type="button" class="mobile-preview-btn" aria-controls="previewArea" aria-expanded="false" onclick="openMobilePreview()" aria-label="查看预览">
+  <span class="mobile-preview-icon">👁</span>
+  <span class="mobile-preview-count" id="mobilePreviewCount">1</span>
+</button>
+
+<div id="measureContainer" style="position:absolute;left:-9999px;top:0;"></div>
+<div id="exportContainer" style="position:absolute;left:-9999px;top:0;"></div>
+<input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageFile(this)">
+<input type="file" id="collageInput" accept="image/*" multiple style="display:none" onchange="handleCollageFiles(this)">
+<input type="file" id="videoInput" accept="video/mp4,video/quicktime,.mp4,.mov" style="display:none" onchange="handleVideoFile(this)">
+
+<script src="vendor/mp4box.all.min.js"></script>
+<script src="vendor/mp4-muxer.js"></script>
+<script src="cloud-config.js?v=20260915-draft-autosave-v1"></script>
+<script src="vendor/supabase.js?v=20260816-local-vendor-v1"></script>
+<script src="draft-storage.js?v=20260915-draft-autosave-v1"></script>
+<script type="module" src="video-timeline.js?v=20260915-draft-autosave-v1"></script>
+<script src="editor-highlight.js?v=20260915-draft-autosave-v1"></script>
+<script src="collage-layout.js?v=20260915-draft-autosave-v1"></script>
+<script src="app.js?v=20260915-draft-autosave-v1"></script>
+<script src="backup.js?v=20260915-draft-autosave-v1"></script>
+</body>
+</html>
