@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readAppSource } from "./helpers/app-source.mjs";
 import vm from "node:vm";
 
 const [highlightSource, appSource, styleSource, htmlSource, backupSource] = await Promise.all([
   readFile(new URL("../editor-highlight.js", import.meta.url), "utf8"),
-  readFile(new URL("../app.js", import.meta.url), "utf8"),
+  readAppSource(),
   readFile(new URL("../style.css", import.meta.url), "utf8"),
   readFile(new URL("../index.html", import.meta.url), "utf8"),
   readFile(new URL("../backup.js", import.meta.url), "utf8"),

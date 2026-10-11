@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readAppSource } from "./helpers/app-source.mjs";
 import vm from "node:vm";
 
 const [backupSource, appSource, workerSource, resetSource, buildSource] = await Promise.all([
   readFile(new URL("../backup.js", import.meta.url), "utf8"),
-  readFile(new URL("../app.js", import.meta.url), "utf8"),
+  readAppSource(),
   readFile(new URL("../sw.js", import.meta.url), "utf8"),
   readFile(new URL("../card-layout-reset.html", import.meta.url), "utf8"),
   readFile(new URL("../build.mjs", import.meta.url), "utf8"),

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readAppSource } from './helpers/app-source.mjs';
 import test from 'node:test';
 
 import {
@@ -9,7 +10,7 @@ import {
 } from '../video-timeline.js';
 
 const [appSource, htmlSource, styleSource] = await Promise.all([
-  readFile(new URL('../app.js', import.meta.url), 'utf8'),
+  readAppSource(),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
 ]);
