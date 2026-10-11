@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readAppSource } from './helpers/app-source.mjs';
 
-const [html, css, app, reset] = await Promise.all([
+const [html, css, app] = await Promise.all([
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
   readAppSource(),
-  readFile(new URL('../card-layout-reset.html', import.meta.url), 'utf8'),
 ]);
 
 const countMatches = (source, pattern) => (source.match(pattern) || []).length;
@@ -164,14 +163,13 @@ test('导出进度以状态浮层显示，不会重新撑高紧凑顶栏', () =>
   assert.match(progressRule, /pointer-events:\s*none/);
 });
 
-test('缓存版本在入口、动态模块和重置链接中保持一致', () => {
+test('缓存版本在入口和动态模块中保持一致', () => {
   const localAssets = /(?:manifest\.json|style\.css|backup\.css|readability\.css|draft-storage\.js|video-timeline\.js|editor-highlight\.js|collage-layout\.js|app\.js|backup\.js)\?v=([^"']+)/g;
   const versions = [...html.matchAll(localAssets)].map((match) => match[1]);
   assert.equal(versions.length, 10, '入口应包含 10 个本地版本化资产');
   assert.equal(new Set(versions).size, 1, '入口资产必须使用同一缓存版本');
   const [version] = versions;
   assert.match(app, new RegExp(`video-timeline\\.js\\?v=${version}`));
-  assert.equal(countMatches(reset, new RegExp(version, 'g')), 2, '重置页的两处版本必须同步');
 });
 
 test('手机预览控件只在预览打开时显示，并恢复原滚动位置', () => {

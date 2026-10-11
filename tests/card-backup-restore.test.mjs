@@ -3,12 +3,12 @@ import { readFile } from "node:fs/promises";
 import { readAppSource } from "./helpers/app-source.mjs";
 import vm from "node:vm";
 
-const [backupSource, appSource, workerSource, resetSource, buildSource] = await Promise.all([
+const [backupSource, appSource, htmlSource, buildSource, serverSource] = await Promise.all([
   readFile(new URL("../backup.js", import.meta.url), "utf8"),
   readAppSource(),
-  readFile(new URL("../sw.js", import.meta.url), "utf8"),
-  readFile(new URL("../card-layout-reset.html", import.meta.url), "utf8"),
+  readFile(new URL("../index.html", import.meta.url), "utf8"),
   readFile(new URL("../build.mjs", import.meta.url), "utf8"),
+  readFile(new URL("../server.mjs", import.meta.url), "utf8"),
 ]);
 
 const context = {
@@ -456,16 +456,12 @@ assert.match(backupSource, /window\.cardDraftRestoreInProgress = true/);
 assert.doesNotMatch(backupSource, /location\.reload\(\)/);
 assert.match(appSource, /window\.reloadCardDrafts = async \(\) =>/);
 assert.match(appSource, /if \(!window\.cardDraftRestoreInProgress\) this\.saveDraft\(\)/);
-assert.match(workerSource, /self\.addEventListener\('fetch'/);
-assert.match(workerSource, /event\.respondWith\(fetch\(event\.request\)\)/);
-assert.match(workerSource, /self\.registration\.unregister\(\)/);
-assert.match(resetSource, /url\.origin === location\.origin && url\.pathname\.startsWith\('\/'\)/);
-assert.match(resetSource, /key\.startsWith\('card-tool-'\)/);
-assert.match(resetSource, /remainingRegistrations\.some/);
-assert.match(resetSource, /retryWrap\.hidden = false;\s+return;/);
-assert.match(resetSource, /location\.replace\(target\.href\)/);
-assert.match(resetSource, /20261005-local-drafts-v1/g);
-assert.match(buildSource, /"card-layout-reset\.html"/);
+// sw.js 与重置页已移除，旧版 Service Worker 和 card-tool- 缓存改由页面加载时清理。
+assert.match(htmlSource, /navigator\.serviceWorker\.getRegistrations\(\)/);
+assert.match(appSource, /registration\.unregister\(\)/);
+assert.match(appSource, /key\.startsWith\('card-tool-'\)/);
+assert.doesNotMatch(buildSource, /"sw\.js"|"card-layout-reset\.html"/);
+assert.doesNotMatch(serverSource, /"sw\.js"|"card-layout-reset\.html"/);
 assert.match(backupSource, /window\.getCardDraftStore/);
 assert.match(backupSource, /window\.replaceCardDraftStore/);
 assert.match(appSource, /window\.getCardDraftStore = async \(\) =>/);

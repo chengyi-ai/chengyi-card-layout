@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { readAppSource } from "./helpers/app-source.mjs";
 
-const [app, style, toolHtml, resetHtml, build] = await Promise.all([
+const [app, style, toolHtml, build] = await Promise.all([
   readAppSource(),
   readFile("style.css", "utf8"),
   readFile("index.html", "utf8"),
-  readFile("card-layout-reset.html", "utf8"),
   readFile("build.mjs", "utf8"),
 ]);
 
@@ -27,10 +26,8 @@ assert.match(style, /\.hl-stroke-v2\s*\{[\s\S]*rotate\(-0\.11deg\)/);
 assert.match(style, /\.hl-stroke-v3\s*\{[\s\S]*rotate\(0\.15deg\)/);
 const styleVersion = toolHtml.match(/style\.css\?v=([^"']+)/)?.[1];
 const appVersion = toolHtml.match(/app\.js\?v=([^"']+)/)?.[1];
-const resetVersion = resetHtml.match(/target\.searchParams\.set\('v', '([^']+)'\)/)?.[1];
 assert.ok(styleVersion, "card-layout style.css must have a cache-busting version");
 assert.equal(appVersion, styleVersion, "card-layout CSS and JS cache versions must stay aligned");
-assert.equal(resetVersion, styleVersion, "cache-reset bridge must open the current card-layout version");
 assert.match(build, /Cache-Control: no-cache/);
 assert.doesNotMatch(build, /dist\/server|handleCardDraftRequest/);
 
