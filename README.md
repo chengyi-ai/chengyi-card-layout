@@ -32,3 +32,9 @@ npm run build
 构建提供 `dist/_headers`，声明 nosniff、Referrer-Policy、X-Frame-Options、Permissions-Policy、CSP 和缓存策略。未验证 Sites 静态托管是否解析 `_headers`：如托管平台不支持，应在平台响应头设置中配置相同规则；静态文件本身无法保证 HTTP 安全头生效。本地开发服务继续返回这些安全头。
 
 `manifest.json` 使用相对根路径。保留 `card-layout-reset.html` 和注销旧 Service Worker 的逻辑，清理旧 `card-tool-*` 缓存，不清理用户草稿。
+
+## 开源许可证
+
+项目代码采用 [MIT License](LICENSE)，允许使用、修改和商业使用，分发时需保留版权及许可证声明。
+
+第三方依赖与改编代码继续遵守各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [vendor/README.md](vendor/README.md)。
