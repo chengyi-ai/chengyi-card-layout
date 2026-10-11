@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readAppSource } from "./helpers/app-source.mjs";
 
 const [app, style, toolHtml, resetHtml, build] = await Promise.all([
-  readFile("app.js", "utf8"),
+  readAppSource(),
   readFile("style.css", "utf8"),
   readFile("index.html", "utf8"),
   readFile("card-layout-reset.html", "utf8"),
