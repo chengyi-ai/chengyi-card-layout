@@ -8,6 +8,6 @@
     "dev": "node --env-file-if-exists=.env server.mjs",
     "start": "node --env-file-if-exists=.env server.mjs",
     "build": "node build.mjs",
-    "test": "node tests/card-highlight.test.mjs && node --test tests/card-crop-removal.test.mjs && node --test tests/card-compact-layout.test.mjs && node --test tests/card-collage-layout.test.mjs && node --test tests/card-collage-integration.test.mjs && node --test tests/card-layout-shell.test.mjs && node tests/card-shadow-export.test.mjs && node tests/card-editor-behavior.test.mjs && node tests/card-backup-restore.test.mjs && node --test tests/card-media-store.test.mjs && node --test tests/card-draft-regression.test.mjs && node --test tests/card-draft-storage.test.mjs && node --test tests/card-live-photo.test.mjs && node --test tests/card-video-integration.test.mjs && node --test tests/card-video-timeline.test.mjs && node --test tests/card-static-server.test.mjs && node --test tests/card-app-scripts.test.mjs"
+    "test": "node --test \"tests/*.test.mjs\""
   }
 }
