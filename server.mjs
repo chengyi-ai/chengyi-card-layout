@@ -7,7 +7,6 @@ const DEFAULT_ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 const ALLOWED_FILES = new Set([
   "index.html",
-  "card-layout-reset.html",
   "app.js",
   "card-core.js",
   "card-editor.js",
@@ -28,7 +27,6 @@ const ALLOWED_FILES = new Set([
   "media-store.js",
   "readability.css",
   "style.css",
-  "sw.js",
   "video-timeline.js",
   "头像.png",
   "vendor/html2canvas.min.js",

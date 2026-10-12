@@ -16,7 +16,6 @@ const vendorHashes = new Map([
 
 const assetFiles = [
   "index.html",
-  "card-layout-reset.html",
   "app.js",
   "card-core.js",
   "card-editor.js",
@@ -37,7 +36,6 @@ const assetFiles = [
   "media-store.js",
   "readability.css",
   "style.css",
-  "sw.js",
   "video-timeline.js",
   "头像.png",
   "THIRD_PARTY_NOTICES.md",

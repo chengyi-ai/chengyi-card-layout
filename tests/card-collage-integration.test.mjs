@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readAppSource } from './helpers/app-source.mjs';
 
-const [app, html, css, reset] = await Promise.all([
+const [app, html, css] = await Promise.all([
   readAppSource(),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../style.css', import.meta.url), 'utf8'),
-  readFile(new URL('../card-layout-reset.html', import.meta.url), 'utf8'),
 ]);
 
 function extractBlock(source, signature, label) {
@@ -44,7 +43,6 @@ test('自由拼贴入口和缓存版本完整接入', () => {
   assert.match(html, /id="collageInput"[^>]*multiple/);
   assert.match(html, /collage-layout\.js\?v=20261005-local-drafts-v1/);
   assert.match(html, /app\.js\?v=20261005-local-drafts-v1/);
-  assert.match(reset, /20261005-local-drafts-v1/g);
 });
 
 test('选中自由拼贴图片后，剪贴板图片直接加入当前拼贴', () => {
